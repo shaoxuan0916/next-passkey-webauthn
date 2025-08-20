@@ -1,20 +1,26 @@
-# Next-Passkey Documentation
+# Next-Passkey-Webauthn
 
-Welcome to the Next-Passkey-Webauthn documentation! This package provides a focused, minimal, and extensible **Passkey (WebAuthn)** SDK for Next.js applications.
+A focused, minimal, and extensible **Passkey (WebAuthn)** SDK for Next.js applications.
 
 ## What is Next-Passkey-Webauthn?
 
-Next-Passkey-Webauthn is a comprehensive WebAuthn solution that provides:
+This library provides a complete WebAuthn solution with:
 
-- **Client-side**: Lightweight React hooks that wrap `@simplewebauthn/browser`
-- **Server-side**: Small utilities/handlers that wrap `@simplewebauthn/server`
-- **Persistence**: Pluggable adapters for credential storage (Prisma/Postgres, Supabase)
-- **Challenge Storage**: Flexible challenge stores (Redis, Database, in-memory)
-- **Type Safety**: Full TypeScript support with comprehensive type definitions
+- **Client-side**: React hooks that wrap `@simplewebauthn/browser`
+- **Server-side**: Utilities that wrap `@simplewebauthn/server`
+- **Persistence**: Pluggable adapters for credential storage (Prisma, Supabase)
+- **Challenge Storage**: Flexible challenge stores (Redis, Database)
+- **Type Safety**: Full TypeScript support
+
+## Installation
+
+```bash
+npm install next-passkey-webauthn
+```
 
 ## Quick Start
 
-Choose your preferred setup from the guides below:
+Choose your preferred setup:
 
 ### 🚀 Setup Guides
 
@@ -23,47 +29,47 @@ Choose your preferred setup from the guides below:
   - Redis for fast challenge storage
   - Scales across multiple nodes
 
-- **[Prisma + Redis](./docs/prisma-redis-setup.md)** - **Coming soon**
+- **[Prisma + Redis](./docs/prisma-redis-setup.md)**
   - Prisma ORM with PostgreSQL
   - Redis for challenge storage
   - Full type safety with Prisma
 
-- **[Supabase + Supabase Store](./docs/supabase-store-setup.md)** - **Coming soon**
+- **[Supabase + Database Store](./docs/supabase-store-setup.md)**
   - All-in-one Supabase solution
   - PostgreSQL for both credentials and challenges
   - Simple deployment
 
-- **[Prisma + Database Store](./docs/prisma-db-setup.md)** - **Coming soon**
+- **[Prisma + Database Store](./docs/prisma-store-setup.md)**
   - Prisma ORM with PostgreSQL
   - Database-backed challenge storage
   - No external dependencies
 
 ## Architecture Overview
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Client Side   │    │   Server Side   │    │   Storage       │
-│                 │    │                 │    │                 │
-│ React Hooks     │◄──►│ WebAuthn        │◄──►│ Adapters        │
-│ Device Detection│    │ Handlers        │    │ Challenge       │
-│ Error Handling  │    │ Validation      │    │ Stores          │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-```
+The library follows a clean separation of concerns with three main layers:
+
+**Client Side**: React hooks that handle user interactions, device detection, and API communication. Hooks like `useRegisterPasskey`, `useAuthenticatePasskey`, and `useManagePasskeys` provide a simple interface for components.
+
+**Server Side**: WebAuthn handlers that manage the registration and authentication flows. Functions like `startRegistration`, `finishRegistration`, `startAuthentication`, and `finishAuthentication` handle the core WebAuthn logic and validation.
+
+**Storage Layer**: Pluggable adapters and stores for data persistence. Adapters (Prisma, Supabase) handle credential storage, while challenge stores (Redis, Database) manage temporary challenge data during WebAuthn flows.
+
+The architecture is designed to be modular - you can mix and match different adapters and stores based on your infrastructure needs.
 
 ## Key Features
 
-### 🔐 WebAuthn Support
+### WebAuthn Support
 - **Registration**: Create new passkeys with device detection
 - **Authentication**: Secure login with existing passkeys
 - **Management**: List, delete, and manage user passkeys
 - **Multi-device**: Support for multiple authenticators per user
 
-### 🏗️ Pluggable Architecture
+### Pluggable Architecture
 - **Adapters**: Switch between Prisma, Supabase, or custom implementations
 - **Stores**: Choose between Redis, Database, or other challenge storage
 - **Configuration**: Flexible relying party and security settings
 
-### 🎯 Developer Experience
+### Developer Experience
 - **TypeScript First**: Complete type safety and IntelliSense
 - **React Hooks**: Simple, declarative API for components
 - **Error Handling**: Comprehensive error types and messages
@@ -76,19 +82,13 @@ Choose your preferred setup from the guides below:
 - **Authentication**: Using existing passkeys to login
 
 ### Storage Layers
-- **Credential Storage**: Persistent storage of passkey data
-- **Challenge Storage**: Temporary storage during WebAuthn flows
+- **Credential Storage**: Persistent storage of passkey data via adapters
+- **Challenge Storage**: Temporary storage during WebAuthn flows via stores
 
 ### Security Features
 - **Challenge Verification**: Prevents replay attacks
 - **Origin Validation**: Ensures requests come from trusted domains
 - **Counter Management**: Tracks authenticator usage
-
-## Installation
-
-```bash
-npm install next-passkey-webauthn
-```
 
 ## API Reference
 
@@ -112,13 +112,17 @@ npm install next-passkey-webauthn
 ### Challenge Stores
 - `RedisStore` - Redis-based challenge storage
 - `DbStore` - Database-based challenge storage
+- `SupabaseStore` - Supabase-based challenge storage
 
 ## Examples
 
 Check out the setup guides for complete, working examples:
 
 - [Supabase + Redis Setup](./docs/supabase-redis-setup.md)
-- More guides coming soon...
+- [Prisma + Redis Setup](./docs/prisma-redis-setup.md)
+- [Supabase + Database Store Setup](./docs/supabase-store-setup.md)
+- [Prisma + Database Store Setup](./docs/prisma-store-setup.md)
+- [API Reference](./docs/api-reference.md)
 
 ## Contributing
 
