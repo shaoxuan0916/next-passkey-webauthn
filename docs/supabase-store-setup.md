@@ -1,13 +1,13 @@
-# Supabase + Redis Setup Guide
+# Supabase Store Setup Guide
 
-A complete guide for setting up passkey authentication using Supabase PostgreSQL for credential storage and Redis for challenge storage.
+A complete guide for setting up passkey authentication using Supabase PostgreSQL for both credential storage and challenge storage.
 
 ## Overview
 
 This setup provides a **passkey integration toolkit** for your existing application:
 
-- **Supabase**: Managed PostgreSQL database for storing passkey credentials
-- **Redis**: Fast, in-memory challenge storage with automatic TTL
+- **Supabase**: Managed PostgreSQL database for storing passkey credentials AND challenges
+- **Single Database**: All passkey data in one place for easier management
 - **Production Ready**: Scales across multiple nodes
 - **Type Safe**: Full TypeScript support
 
@@ -31,10 +31,10 @@ This library is **NOT** a complete authentication system like Clerk or Supabase 
 
 ## 1. Database Setup
 
-Create the `passkeys` table in your Supabase PostgreSQL database:
+Create the required tables in your Supabase PostgreSQL database:
 
 ```sql
--- Create the passkeys table
+-- Create the passkeys table for credential storage
 CREATE TABLE passkeys (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
@@ -53,14 +53,27 @@ CREATE TABLE passkeys (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Create the passkey_challenges table for challenge storage
+CREATE TABLE passkey_challenges (
+  id TEXT PRIMARY KEY,              -- Format: ${userId}:${flow}
+  user_id TEXT NOT NULL,
+  flow TEXT NOT NULL,               -- 'registration' or 'authentication'
+  challenge TEXT NOT NULL,          -- base64url encoded challenge
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Create indexes for better performance
 CREATE INDEX idx_passkeys_user_id ON passkeys(user_id);
 CREATE INDEX idx_passkeys_credential_id ON passkeys(credential_id);
+CREATE INDEX idx_passkey_challenges_user_id ON passkey_challenges(user_id);
+CREATE INDEX idx_passkey_challenges_expires_at ON passkey_challenges(expires_at);
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE passkeys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE passkey_challenges ENABLE ROW LEVEL SECURITY;
 
--- Create RLS policies for passkey security
+-- Create RLS policies for passkeys
 -- Policy: Users can only access their own passkeys (covers SELECT, INSERT, UPDATE, DELETE)
 CREATE POLICY "Users can manage their own passkeys" ON passkeys
   FOR ALL USING (auth.uid()::text = user_id);
@@ -68,13 +81,39 @@ CREATE POLICY "Users can manage their own passkeys" ON passkeys
 -- Policy: Service role can access all passkeys (for server operations)
 CREATE POLICY "Service role access" ON passkeys
   FOR ALL USING (auth.role() = 'service_role');
+
+-- Create RLS policies for passkey_challenges
+-- Policy: Users can only access their own challenges
+CREATE POLICY "Users can manage their own challenges" ON passkey_challenges
+  FOR ALL USING (auth.uid()::text = user_id);
+
+-- Policy: Service role can access all challenges (for server operations)
+CREATE POLICY "Service role access" ON passkey_challenges
+  FOR ALL USING (auth.role() = 'service_role');
+
+-- Create a function to automatically clean up expired challenges
+CREATE OR REPLACE FUNCTION cleanup_expired_challenges()
+RETURNS void AS $$
+BEGIN
+  DELETE FROM passkey_challenges 
+  WHERE expires_at < NOW();
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create a scheduled job to clean up expired challenges every 5 minutes
+-- Note: This requires pg_cron extension to be enabled in Supabase
+-- If pg_cron is not available, you can run cleanup manually or implement it in your app
+SELECT cron.schedule(
+  'cleanup-expired-challenges',
+  '*/5 * * * *', -- Every 5 minutes
+  'SELECT cleanup_expired_challenges();'
+);
 ```
 
 ## 2. Install Dependencies
 
 ```bash
-npm install next-passkey-webauthn @supabase/supabase-js redis
-npm install -D @types/redis
+npm install next-passkey-webauthn @supabase/supabase-js
 ```
 
 ## 3. Server Configuration
@@ -97,9 +136,8 @@ export const passkeyEndpoints = {
 ```typescript
 // lib/passkey-config.ts
 import { createClient } from '@supabase/supabase-js'
-import { createClient as createRedisClient } from 'redis'
 import { SupabaseAdapter } from 'next-passkey-webauthn/adapters'
-import { RedisStore } from 'next-passkey-webauthn/store'
+import { SupabaseStore } from 'next-passkey-webauthn/store'
 import type { ServerOptions } from 'next-passkey-webauthn/types'
 
 export async function createPasskeyConfig(): Promise<ServerOptions> {
@@ -109,17 +147,9 @@ export async function createPasskeyConfig(): Promise<ServerOptions> {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Initialize Redis client
-  const redis = createRedisClient({
-    url: process.env.REDIS_URL || "redis://localhost:6379",
-  });
-
-  // Connect to Redis
-  await redis.connect();
-
   // Create adapter and store instances
   const passkeyAdapter = new SupabaseAdapter(supabase, "passkeys");
-  const challengeStore = new RedisStore(redis, 300);
+  const challengeStore = new SupabaseStore(supabase, "passkey_challenges");
 
   // Relying party configuration
   const rpConfig = {
@@ -629,29 +659,13 @@ Add these to your `.env.local`:
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
-# Redis
-REDIS_URL=redis://localhost:6379
-
 # WebAuthn
 NEXT_PUBLIC_RP_ID=localhost
 NEXT_PUBLIC_RP_NAME=Your App Name
 NEXT_PUBLIC_EXPECTED_ORIGIN=http://localhost:3000
 ```
 
-## 7. Redis Setup (Development)
-
-For local development, you can use Docker:
-
-```bash
-docker run -d -p 6379:6379 redis:alpine
-```
-
-## 8. Production Considerations
-
-### Redis Configuration
-- Use Redis Cluster for high availability
-- Set appropriate memory limits and eviction policies
-- Monitor Redis performance and memory usage
+## 7. Production Considerations
 
 ### Supabase Configuration
 - Enable Row Level Security (RLS) for production
@@ -668,17 +682,12 @@ docker run -d -p 6379:6379 redis:alpine
 
 ### Common Issues
 
-1. **Redis Connection Failed**
-   - Check Redis server is running
-   - Verify connection URL and credentials
-   - Ensure Redis client is properly connected
-
-2. **Supabase Permission Denied**
+1. **Supabase Permission Denied**
    - Check service role key permissions
    - Verify table exists and RLS policies
    - Ensure proper database schema
 
-3. **WebAuthn Not Supported**
+2. **WebAuthn Not Supported**
    - Check browser compatibility
    - Ensure HTTPS in production
    - Verify domain configuration
