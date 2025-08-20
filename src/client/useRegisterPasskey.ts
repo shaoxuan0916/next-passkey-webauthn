@@ -7,11 +7,56 @@ import { useCallback, useState } from "react";
 import {
   type ClientConfig,
   ErrorCodes,
+  type PasskeyDeviceInfo,
+  type PasskeyManagementOptions,
   PasskeyError,
   type RegisterPasskeyHook,
   type RegistrationStartOptions,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
+
+/**
+ * Detect device information from user agent and browser APIs
+ */
+function detectDeviceInfo(): PasskeyDeviceInfo {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return {};
+  }
+
+  const ua = navigator.userAgent;
+  const deviceInfo: PasskeyDeviceInfo = {};
+
+  // Detect OS
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = /iPad/i.test(ua) ? "iPadOS" : "iOS";
+    deviceInfo.deviceType = /iPad/i.test(ua) ? "iPad" : "iPhone";
+  } else if (/Mac/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = "macOS";
+    deviceInfo.deviceType = "Mac";
+  } else if (/Windows/i.test(ua)) {
+    deviceInfo.os = "Windows";
+    deviceInfo.deviceType = "Windows PC";
+  } else if (/Android/i.test(ua)) {
+    deviceInfo.os = "Android";
+    deviceInfo.deviceType = "Android Device";
+  } else if (/Linux/i.test(ua)) {
+    deviceInfo.os = "Linux";
+    deviceInfo.deviceType = "Linux PC";
+  }
+
+  // Detect browser
+  if (/Chrome/i.test(ua) && !/Edge/i.test(ua)) {
+    deviceInfo.browser = "Chrome";
+  } else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) {
+    deviceInfo.browser = "Safari";
+  } else if (/Firefox/i.test(ua)) {
+    deviceInfo.browser = "Firefox";
+  } else if (/Edge/i.test(ua)) {
+    deviceInfo.browser = "Edge";
+  }
+
+  return deviceInfo;
+}
 
 /**
  * React hook for passkey registration
@@ -23,20 +68,33 @@ export function useRegisterPasskey(config: ClientConfig): RegisterPasskeyHook {
   const register = useCallback(
     async (
       userId: string,
-      options?: RegistrationStartOptions
+      options?: RegistrationStartOptions & {
+        managementOptions?: PasskeyManagementOptions;
+        nickname?: string;
+      }
     ): Promise<{ verified: boolean; credential?: StoredCredential }> => {
       setLoading(true);
       setError(null);
 
       try {
-        // Step 1: Start registration flow
+        // Detect device information
+        const deviceInfo = detectDeviceInfo();
+        if (options?.nickname) {
+          deviceInfo.nickname = options.nickname;
+        }
+
+        // Step 1: Start registration flow with device info
         const startResponse = await fetch(config.endpoints.registerStart, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ userId, ...options }),
+          body: JSON.stringify({
+            userId,
+            ...options,
+            deviceInfo,
+          }),
         });
 
         if (!startResponse.ok) {
@@ -88,14 +146,19 @@ export function useRegisterPasskey(config: ClientConfig): RegisterPasskeyHook {
           );
         }
 
-        // Step 3: Finish registration flow
+        // Step 3: Finish registration flow with device info
         const finishResponse = await fetch(config.endpoints.registerFinish, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ userId, credential }),
+          body: JSON.stringify({
+            userId,
+            credential,
+            deviceInfo,
+            managementOptions: options?.managementOptions,
+          }),
         });
 
         if (!finishResponse.ok) {

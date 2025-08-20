@@ -5,36 +5,44 @@ import {
   listUserPasskeys,
   startAuthentication,
   startRegistration
-} from "./chunk-QTCO4ZDK.js";
+} from "./chunk-YGKEZRY5.js";
 import {
+  detectDeviceInfo,
+  generatePasskeyNickname,
+  getPasskeyIcon,
+  isSameAuthenticator,
   useAuthenticatePasskey,
   useManagePasskeys,
   useRegisterPasskey
-} from "./chunk-2NKIVCIT.js";
+} from "./chunk-AWUICR6C.js";
 import {
   PrismaAdapter,
   SupabaseAdapter
-} from "./chunk-62DGVYXI.js";
+} from "./chunk-JJ7FVCVZ.js";
 import {
   DbStore,
-  MemoryStore,
-  RedisStore
-} from "./chunk-VAXUQYAM.js";
+  RedisStore,
+  SupabaseStore
+} from "./chunk-RDZZEFHF.js";
 import {
   ErrorCodes,
   PasskeyError
-} from "./chunk-VXYRGCBZ.js";
+} from "./chunk-HWVRT2MF.js";
 export {
   DbStore,
   ErrorCodes,
-  MemoryStore,
   PasskeyError,
   PrismaAdapter,
   RedisStore,
   SupabaseAdapter,
+  SupabaseStore,
   deletePasskey,
+  detectDeviceInfo,
   finishAuthentication,
   finishRegistration,
+  generatePasskeyNickname,
+  getPasskeyIcon,
+  isSameAuthenticator,
   listUserPasskeys,
   startAuthentication,
   startRegistration,

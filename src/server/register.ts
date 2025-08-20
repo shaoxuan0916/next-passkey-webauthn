@@ -6,14 +6,17 @@ import {
   verifyRegistrationResponse,
 } from "@simplewebauthn/server";
 import {
+  type AuthenticatorAttachment,
   type ChallengeRecord,
   ErrorCodes,
   type Flow,
   PasskeyError,
+  type PasskeyDeviceInfo,
+  type PasskeyManagementOptions,
   type RegistrationStartOptions,
   type ServerOptions,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
 
 /**
  * Start passkey registration flow
@@ -21,11 +24,27 @@ import {
 export async function startRegistration(
   userId: string,
   options: ServerOptions,
-  registrationOptions?: RegistrationStartOptions
+  registrationOptions?: RegistrationStartOptions & {
+    deviceInfo?: PasskeyDeviceInfo;
+    managementOptions?: PasskeyManagementOptions;
+  }
 ): Promise<PublicKeyCredentialCreationOptionsJSON> {
   try {
     // Get existing credentials to exclude from registration
     const existingCredentials = await options.adapter.listUserPasskeys(userId);
+
+    // Check management constraints
+    const managementOptions = registrationOptions?.managementOptions;
+    if (
+      managementOptions?.maxPasskeysPerUser &&
+      existingCredentials.length >= managementOptions.maxPasskeysPerUser
+    ) {
+      throw new PasskeyError(
+        `Maximum number of passkeys (${managementOptions.maxPasskeysPerUser}) reached for this user`,
+        ErrorCodes.INVALID_INPUT
+      );
+    }
+
     const excludeCredentials = existingCredentials.map((cred) => ({
       id: cred.credentialId,
       type: "public-key" as const,
@@ -39,7 +58,7 @@ export async function startRegistration(
       userID: Buffer.from(userId, "utf-8"),
       userName: registrationOptions?.userName || userId,
       userDisplayName: registrationOptions?.userDisplayName || userId,
-      timeout: registrationOptions?.timeout || 300000, // 5 minutes
+      timeout: registrationOptions?.timeout || 1000 * 60 * 5, // 5 minutes
       attestationType: "none",
       excludeCredentials: excludeCredentials,
       authenticatorSelection: {
@@ -51,7 +70,8 @@ export async function startRegistration(
     });
 
     // Store challenge
-    const expiresAt = Date.now() + (registrationOptions?.timeout || 300000);
+    const expiresAt =
+      Date.now() + (registrationOptions?.timeout || 1000 * 60 * 5); // 5 minutes
     const challengeRecord: ChallengeRecord = {
       id: `${userId}:registration`,
       userId,
@@ -82,7 +102,10 @@ export async function finishRegistration(
   userId: string,
   credential: RegistrationResponseJSON,
   options: ServerOptions,
-  registrationOptions?: RegistrationStartOptions
+  registrationOptions?: RegistrationStartOptions & {
+    deviceInfo?: PasskeyDeviceInfo;
+    managementOptions?: PasskeyManagementOptions;
+  }
 ): Promise<{ verified: boolean; credential?: StoredCredential }> {
   try {
     // Retrieve challenge
@@ -123,19 +146,18 @@ export async function finishRegistration(
     // Extract credential information
     const {
       credential: {
-        id: credentialID,
+        id: credentialId,
         publicKey: credentialPublicKey,
         counter,
         transports,
       },
+      credentialBackedUp,
+      credentialDeviceType,
     } = verification.registrationInfo;
-
-    // Convert credential ID to base64url string
-    const credentialIdString = Buffer.from(credentialID).toString("base64url");
 
     // Check if credential already exists
     const existingCredential = await options.adapter.findByCredentialId(
-      credentialIdString
+      credentialId
     );
     if (existingCredential) {
       throw new PasskeyError(
@@ -144,15 +166,91 @@ export async function finishRegistration(
       );
     }
 
-    // Store the credential
+    // Determine authenticator attachment using multiple signals
+    let authenticatorAttachment: AuthenticatorAttachment;
+
+    // Method 1: Check transports for "internal" (platform authenticators)
+    const hasInternalTransport = transports?.includes("internal");
+
+    // Method 2: Check device type
+    const isSingleDevice = credentialDeviceType === "singleDevice";
+
+    // Method 3: Check device info for known platform devices
+    const deviceInfo = registrationOptions?.deviceInfo;
+    const isPlatformDevice =
+      deviceInfo &&
+      ((deviceInfo.os === "macOS" && deviceInfo.deviceType === "Mac") ||
+        (deviceInfo.os === "iOS" &&
+          (deviceInfo.deviceType === "iPhone" ||
+            deviceInfo.deviceType === "iPad")) ||
+        (deviceInfo.os === "iPadOS" && deviceInfo.deviceType === "iPad") ||
+        (deviceInfo.os === "Windows" &&
+          deviceInfo.deviceType === "Windows PC"));
+
+    // Determine attachment (prioritize transport, then device type, then device info)
+    if (hasInternalTransport || isSingleDevice || isPlatformDevice) {
+      authenticatorAttachment = "platform";
+    } else {
+      authenticatorAttachment = "cross-platform";
+    }
+
+    // Check for duplicate authenticators
+    // Default: prevent duplicates for platform authenticators, allow for cross-platform
+    const shouldPreventDuplicates =
+      registrationOptions?.managementOptions?.preventDuplicateAuthenticators !==
+        false && authenticatorAttachment === "platform";
+
+    if (shouldPreventDuplicates) {
+      const existingCredentials = await options.adapter.listUserPasskeys(
+        userId
+      );
+
+      const isDuplicate = existingCredentials.some((existing) => {
+        // For platform authenticators, check if same device type and OS
+        if (
+          existing.authenticatorAttachment === "platform" &&
+          authenticatorAttachment === "platform"
+        ) {
+          // If we have device info for both, compare them
+          if (existing.deviceInfo && registrationOptions?.deviceInfo) {
+            return (
+              existing.deviceInfo.deviceType ===
+                registrationOptions.deviceInfo.deviceType &&
+              existing.deviceInfo.os === registrationOptions.deviceInfo.os
+            );
+          }
+
+          // If no device info available, assume it's a duplicate platform authenticator
+          // This prevents multiple platform passkeys on the same device
+          return true;
+        }
+
+        return false;
+      });
+
+      if (isDuplicate) {
+        const deviceName =
+          registrationOptions?.deviceInfo?.deviceType || "this device";
+        throw new PasskeyError(
+          `You already have a passkey on ${deviceName}. Each device can only have one passkey.`,
+          ErrorCodes.INVALID_INPUT
+        );
+      }
+    }
+
+    // Store the credential with enhanced metadata
     const storedCredential = await options.adapter.createPasskey({
       userId,
-      credentialId: credentialID,
+      credentialId,
       publicKey: Buffer.from(credentialPublicKey).toString("base64url"),
       counter,
       transports,
       userName: registrationOptions?.userName,
       userDisplayName: registrationOptions?.userDisplayName,
+      authenticatorAttachment,
+      deviceInfo: registrationOptions?.deviceInfo,
+      backupEligible: credentialBackedUp,
+      backupState: credentialBackedUp,
     });
 
     return {

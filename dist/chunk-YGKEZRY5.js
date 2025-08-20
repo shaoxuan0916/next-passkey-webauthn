@@ -1,7 +1,7 @@
 import {
   ErrorCodes,
   PasskeyError
-} from "./chunk-VXYRGCBZ.js";
+} from "./chunk-HWVRT2MF.js";
 
 // src/server/register.ts
 import {
@@ -11,6 +11,13 @@ import {
 async function startRegistration(userId, options, registrationOptions) {
   try {
     const existingCredentials = await options.adapter.listUserPasskeys(userId);
+    const managementOptions = registrationOptions?.managementOptions;
+    if (managementOptions?.maxPasskeysPerUser && existingCredentials.length >= managementOptions.maxPasskeysPerUser) {
+      throw new PasskeyError(
+        `Maximum number of passkeys (${managementOptions.maxPasskeysPerUser}) reached for this user`,
+        ErrorCodes.INVALID_INPUT
+      );
+    }
     const excludeCredentials = existingCredentials.map((cred) => ({
       id: cred.credentialId,
       type: "public-key",
@@ -22,7 +29,7 @@ async function startRegistration(userId, options, registrationOptions) {
       userID: Buffer.from(userId, "utf-8"),
       userName: registrationOptions?.userName || userId,
       userDisplayName: registrationOptions?.userDisplayName || userId,
-      timeout: registrationOptions?.timeout || 3e5,
+      timeout: registrationOptions?.timeout || 1e3 * 60 * 5,
       // 5 minutes
       attestationType: "none",
       excludeCredentials,
@@ -34,7 +41,7 @@ async function startRegistration(userId, options, registrationOptions) {
       supportedAlgorithmIDs: [-7, -257]
       // ES256, RS256
     });
-    const expiresAt = Date.now() + (registrationOptions?.timeout || 3e5);
+    const expiresAt = Date.now() + (registrationOptions?.timeout || 1e3 * 60 * 5);
     const challengeRecord = {
       id: `${userId}:registration`,
       userId,
@@ -85,15 +92,16 @@ async function finishRegistration(userId, credential, options, registrationOptio
     }
     const {
       credential: {
-        id: credentialID,
+        id: credentialId,
         publicKey: credentialPublicKey,
         counter,
         transports
-      }
+      },
+      credentialBackedUp,
+      credentialDeviceType
     } = verification.registrationInfo;
-    const credentialIdString = Buffer.from(credentialID).toString("base64url");
     const existingCredential = await options.adapter.findByCredentialId(
-      credentialIdString
+      credentialId
     );
     if (existingCredential) {
       throw new PasskeyError(
@@ -101,14 +109,50 @@ async function finishRegistration(userId, credential, options, registrationOptio
         ErrorCodes.INVALID_INPUT
       );
     }
+    let authenticatorAttachment;
+    const hasInternalTransport = transports?.includes("internal");
+    const isSingleDevice = credentialDeviceType === "singleDevice";
+    const deviceInfo = registrationOptions?.deviceInfo;
+    const isPlatformDevice = deviceInfo && (deviceInfo.os === "macOS" && deviceInfo.deviceType === "Mac" || deviceInfo.os === "iOS" && (deviceInfo.deviceType === "iPhone" || deviceInfo.deviceType === "iPad") || deviceInfo.os === "iPadOS" && deviceInfo.deviceType === "iPad" || deviceInfo.os === "Windows" && deviceInfo.deviceType === "Windows PC");
+    if (hasInternalTransport || isSingleDevice || isPlatformDevice) {
+      authenticatorAttachment = "platform";
+    } else {
+      authenticatorAttachment = "cross-platform";
+    }
+    const shouldPreventDuplicates = registrationOptions?.managementOptions?.preventDuplicateAuthenticators !== false && authenticatorAttachment === "platform";
+    if (shouldPreventDuplicates) {
+      const existingCredentials = await options.adapter.listUserPasskeys(
+        userId
+      );
+      const isDuplicate = existingCredentials.some((existing) => {
+        if (existing.authenticatorAttachment === "platform" && authenticatorAttachment === "platform") {
+          if (existing.deviceInfo && registrationOptions?.deviceInfo) {
+            return existing.deviceInfo.deviceType === registrationOptions.deviceInfo.deviceType && existing.deviceInfo.os === registrationOptions.deviceInfo.os;
+          }
+          return true;
+        }
+        return false;
+      });
+      if (isDuplicate) {
+        const deviceName = registrationOptions?.deviceInfo?.deviceType || "this device";
+        throw new PasskeyError(
+          `You already have a passkey on ${deviceName}. Each device can only have one passkey.`,
+          ErrorCodes.INVALID_INPUT
+        );
+      }
+    }
     const storedCredential = await options.adapter.createPasskey({
       userId,
-      credentialId: credentialID,
+      credentialId,
       publicKey: Buffer.from(credentialPublicKey).toString("base64url"),
       counter,
       transports,
       userName: registrationOptions?.userName,
-      userDisplayName: registrationOptions?.userDisplayName
+      userDisplayName: registrationOptions?.userDisplayName,
+      authenticatorAttachment,
+      deviceInfo: registrationOptions?.deviceInfo,
+      backupEligible: credentialBackedUp,
+      backupState: credentialBackedUp
     });
     return {
       verified: true,
@@ -144,19 +188,35 @@ async function startAuthentication(userId, options, authOptions) {
         ErrorCodes.CREDENTIAL_NOT_FOUND
       );
     }
-    const allowCredentials = userCredentials.map((cred) => ({
-      id: cred.credentialId,
-      type: "public-key",
-      transports: cred.transports
-    }));
-    const authenticationOpts = await generateAuthenticationOptions({
-      rpID: options.rpConfig.rpID,
-      timeout: authOptions?.timeout || 3e5,
-      // 5 minutes
-      allowCredentials,
-      userVerification: authOptions?.userVerification || "preferred"
+    const allowCredentials = userCredentials.map((cred) => {
+      let credentialId = cred.credentialId;
+      return {
+        id: credentialId,
+        type: "public-key",
+        transports: cred.transports
+      };
     });
-    const expiresAt = Date.now() + (authOptions?.timeout || 3e5);
+    const hasPlatformAuthenticators = userCredentials.some(
+      (cred) => cred.authenticatorAttachment === "platform"
+    );
+    let finalUserVerification = authOptions?.userVerification || "preferred";
+    let finalTimeout = authOptions?.timeout || 1e3 * 60 * 5;
+    if (hasPlatformAuthenticators && !authOptions?.userVerification) {
+      finalUserVerification = "required";
+      finalTimeout = Math.min(finalTimeout, 1e3 * 60);
+    }
+    const webAuthnOptions = {
+      rpID: options.rpConfig.rpID,
+      timeout: finalTimeout,
+      userVerification: finalUserVerification
+    };
+    if (!hasPlatformAuthenticators) {
+      webAuthnOptions.allowCredentials = allowCredentials;
+    }
+    const authenticationOpts = await generateAuthenticationOptions(
+      webAuthnOptions
+    );
+    const expiresAt = Date.now() + finalTimeout;
     const challengeRecord = {
       id: `${userId}:authentication`,
       userId,
@@ -191,7 +251,7 @@ async function finishAuthentication(userId, credential, options) {
       throw new PasskeyError("Challenge expired", ErrorCodes.CHALLENGE_EXPIRED);
     }
     const credentialIdString = credential.id;
-    const storedCredential = await options.adapter.findByCredentialId(
+    let storedCredential = await options.adapter.findByCredentialId(
       credentialIdString
     );
     if (!storedCredential) {
@@ -306,4 +366,4 @@ export {
   deletePasskey,
   listUserPasskeys
 };
-//# sourceMappingURL=chunk-QTCO4ZDK.js.map
+//# sourceMappingURL=chunk-YGKEZRY5.js.map

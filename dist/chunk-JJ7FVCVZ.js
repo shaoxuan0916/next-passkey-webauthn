@@ -12,7 +12,13 @@ var PrismaAdapter = class {
         counter: data.counter,
         transports: data.transports || [],
         userName: data?.userName,
-        userDisplayName: data?.userDisplayName
+        userDisplayName: data?.userDisplayName,
+        // Enhanced metadata fields
+        authenticatorAttachment: data.authenticatorAttachment,
+        deviceInfo: data.deviceInfo,
+        backupEligible: data.backupEligible || false,
+        backupState: data.backupState || false,
+        lastUsedAt: data.lastUsedAt ? new Date(data.lastUsedAt) : void 0
       }
     });
     return this.mapPrismaToStored(result);
@@ -51,6 +57,13 @@ var PrismaAdapter = class {
       transports: prismaResult.transports,
       userName: prismaResult?.userName || void 0,
       userDisplayName: prismaResult?.userDisplayName || void 0,
+      // Enhanced metadata fields
+      authenticatorAttachment: prismaResult.authenticatorAttachment || void 0,
+      deviceInfo: prismaResult.deviceInfo || void 0,
+      backupEligible: prismaResult.backupEligible || void 0,
+      backupState: prismaResult.backupState || void 0,
+      lastUsedAt: prismaResult.lastUsedAt?.toISOString() || void 0,
+      // Standard timestamps
       createdAt: prismaResult.createdAt.toISOString(),
       updatedAt: prismaResult.updatedAt.toISOString()
     };
@@ -64,15 +77,22 @@ var SupabaseAdapter = class {
     this.tableName = tableName;
   }
   async createPasskey(data) {
-    const { data: result, error } = await this.supabase.from(this.tableName).insert({
+    const insertData = {
       user_id: data.userId,
       credential_id: data.credentialId,
       public_key: data.publicKey,
       counter: data.counter,
       transports: data.transports || [],
       user_name: data?.userName,
-      user_display_name: data?.userDisplayName
-    }).select();
+      user_display_name: data?.userDisplayName,
+      // Enhanced metadata fields
+      authenticator_attachment: data.authenticatorAttachment,
+      device_info: data.deviceInfo || {},
+      backup_eligible: data.backupEligible || false,
+      backup_state: data.backupState || false,
+      last_used_at: data.lastUsedAt ? new Date(data.lastUsedAt).toISOString() : null
+    };
+    const { data: result, error } = await this.supabase.from(this.tableName).insert(insertData).select();
     if (error) {
       throw new Error(`Failed to create passkey: ${error.message}`);
     }
@@ -123,6 +143,13 @@ var SupabaseAdapter = class {
       transports: supabaseResult.transports || void 0,
       userName: supabaseResult?.user_name || void 0,
       userDisplayName: supabaseResult?.user_display_name || void 0,
+      // Enhanced metadata fields
+      authenticatorAttachment: supabaseResult.authenticator_attachment || void 0,
+      deviceInfo: supabaseResult.device_info || void 0,
+      backupEligible: supabaseResult.backup_eligible || void 0,
+      backupState: supabaseResult.backup_state || void 0,
+      lastUsedAt: supabaseResult.last_used_at || void 0,
+      // Standard timestamps
       createdAt: supabaseResult.created_at,
       updatedAt: supabaseResult.updated_at
     };
@@ -133,4 +160,4 @@ export {
   PrismaAdapter,
   SupabaseAdapter
 };
-//# sourceMappingURL=chunk-62DGVYXI.js.map
+//# sourceMappingURL=chunk-JJ7FVCVZ.js.map

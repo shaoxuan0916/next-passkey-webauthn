@@ -1,102 +1,4 @@
-import type { PasskeyAdapter, StoredCredential } from "../types/index.js";
-
-/**
- * Supabase client interface for passkey operations
- * Compatible with @supabase/supabase-js
- */
-export interface SupabaseClient {
-  from(table: string): {
-    insert(data: {
-      user_id: string;
-      credential_id: string;
-      public_key: string;
-      counter: number;
-      transports?: string[];
-      user_name?: string;
-      user_display_name?: string;
-    }): {
-      select(columns?: string): Promise<{
-        data: Array<{
-          id: string;
-          user_id: string;
-          credential_id: string;
-          public_key: string;
-          counter: number;
-          transports: string[] | null;
-          user_name?: string;
-          user_display_name?: string;
-          created_at: string;
-          updated_at: string;
-        }> | null;
-        error: { message: string } | null;
-      }>;
-    };
-
-    select(columns?: string): {
-      eq(
-        column: string,
-        value: string
-      ): Promise<{
-        data: Array<{
-          id: string;
-          user_id: string;
-          credential_id: string;
-          public_key: string;
-          counter: number;
-          transports: string[] | null;
-          user_name?: string;
-          user_display_name?: string;
-          created_at: string;
-          updated_at: string;
-        }> | null;
-        error: { message: string } | null;
-      }>;
-      order(
-        column: string,
-        options?: { ascending: boolean }
-      ): {
-        eq(
-          column: string,
-          value: string
-        ): Promise<{
-          data: Array<{
-            id: string;
-            user_id: string;
-            credential_id: string;
-            public_key: string;
-            counter: number;
-            transports: string[] | null;
-            user_name?: string;
-            user_display_name?: string;
-            created_at: string;
-            updated_at: string;
-          }> | null;
-          error: { message: string } | null;
-        }>;
-      };
-    };
-
-    update(data: { counter: number }): {
-      eq(
-        column: string,
-        value: string
-      ): Promise<{
-        data: unknown;
-        error: { message: string } | null;
-      }>;
-    };
-
-    delete(): {
-      eq(
-        column: string,
-        value: string
-      ): Promise<{
-        data: unknown;
-        error: { message: string } | null;
-      }>;
-    };
-  };
-}
+import type { PasskeyAdapter, StoredCredential } from "../types/index";
 
 /**
  * Supabase adapter for passkey credential storage
@@ -104,7 +6,7 @@ export interface SupabaseClient {
  */
 export class SupabaseAdapter implements PasskeyAdapter {
   constructor(
-    private readonly supabase: SupabaseClient,
+    private readonly supabase: any, // Use 'any' to be compatible with @supabase/supabase-js
     /** Table name for passkeys (default: "passkeys") */
     private readonly tableName = "passkeys"
   ) {}
@@ -112,17 +14,27 @@ export class SupabaseAdapter implements PasskeyAdapter {
   async createPasskey(
     data: Omit<StoredCredential, "id" | "createdAt">
   ): Promise<StoredCredential> {
+    const insertData = {
+      user_id: data.userId,
+      credential_id: data.credentialId,
+      public_key: data.publicKey,
+      counter: data.counter,
+      transports: data.transports || [],
+      user_name: data?.userName,
+      user_display_name: data?.userDisplayName,
+      // Enhanced metadata fields
+      authenticator_attachment: data.authenticatorAttachment,
+      device_info: data.deviceInfo || {},
+      backup_eligible: data.backupEligible || false,
+      backup_state: data.backupState || false,
+      last_used_at: data.lastUsedAt
+        ? new Date(data.lastUsedAt).toISOString()
+        : null,
+    };
+
     const { data: result, error } = await this.supabase
       .from(this.tableName)
-      .insert({
-        user_id: data.userId,
-        credential_id: data.credentialId,
-        public_key: data.publicKey,
-        counter: data.counter,
-        transports: data.transports || [],
-        user_name: data?.userName,
-        user_display_name: data?.userDisplayName,
-      })
+      .insert(insertData)
       .select();
 
     if (error) {
@@ -170,7 +82,7 @@ export class SupabaseAdapter implements PasskeyAdapter {
       return [];
     }
 
-    return data.map((item) => this.mapSupabaseToStored(item));
+    return data.map((item: any) => this.mapSupabaseToStored(item));
   }
 
   async updateCounter(id: string, counter: number): Promise<void> {
@@ -195,18 +107,7 @@ export class SupabaseAdapter implements PasskeyAdapter {
     }
   }
 
-  private mapSupabaseToStored(supabaseResult: {
-    id: string;
-    user_id: string;
-    credential_id: string;
-    public_key: string;
-    counter: number;
-    transports: string[] | null;
-    user_name?: string;
-    user_display_name?: string;
-    created_at: string;
-    updated_at: string;
-  }): StoredCredential {
+  private mapSupabaseToStored(supabaseResult: any): StoredCredential {
     return {
       id: supabaseResult.id,
       userId: supabaseResult.user_id,
@@ -216,6 +117,14 @@ export class SupabaseAdapter implements PasskeyAdapter {
       transports: supabaseResult.transports || undefined,
       userName: supabaseResult?.user_name || undefined,
       userDisplayName: supabaseResult?.user_display_name || undefined,
+      // Enhanced metadata fields
+      authenticatorAttachment:
+        supabaseResult.authenticator_attachment || undefined,
+      deviceInfo: supabaseResult.device_info || undefined,
+      backupEligible: supabaseResult.backup_eligible || undefined,
+      backupState: supabaseResult.backup_state || undefined,
+      lastUsedAt: supabaseResult.last_used_at || undefined,
+      // Standard timestamps
       createdAt: supabaseResult.created_at,
       updatedAt: supabaseResult.updated_at,
     };

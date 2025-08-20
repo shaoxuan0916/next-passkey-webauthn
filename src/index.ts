@@ -17,11 +17,11 @@
  */
 
 // Re-export everything for convenience (main entry point)
-export * from "./server/index.js";
-export * from "./client/index.js";
-export * from "./adapters/index.js";
-export * from "./store/index.js";
-export * from "./types/index.js";
+export * from "./server/index";
+export * from "./client/index";
+export * from "./adapters/index";
+export * from "./store/index";
+export * from "./types/index";
 
 // Named exports for better tree-shaking
 export {
@@ -32,31 +32,29 @@ export {
   finishAuthentication,
   deletePasskey,
   listUserPasskeys,
-} from "./server/index.js";
+} from "./server/index";
 
 export {
   // Client hooks
   useRegisterPasskey,
   useAuthenticatePasskey,
   useManagePasskeys,
-} from "./client/index.js";
+} from "./client/index";
 
 export {
   // Adapters
   PrismaAdapter,
   SupabaseAdapter,
   type PrismaClient,
-  type SupabaseClient,
-} from "./adapters/index.js";
+} from "./adapters/index";
 
 export {
   // Stores
-  MemoryStore,
   RedisStore,
   DbStore,
   type RedisClient,
   type DatabaseClient,
-} from "./store/index.js";
+} from "./store/index";
 
 export {
   // Core types
@@ -71,4 +69,4 @@ export {
   type ClientConfig,
   type Flow,
   type ErrorCode,
-} from "./types/index.js";
+} from "./types/index";

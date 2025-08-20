@@ -11,7 +11,7 @@ import {
   ErrorCodes,
   PasskeyError,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
 
 /**
  * React hook for passkey authentication

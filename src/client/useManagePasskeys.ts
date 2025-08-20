@@ -5,10 +5,10 @@ import {
   type ManagePasskeysHook,
   PasskeyError,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
 
 /**
- * React hook for managing passkeys (list, delete)
+ * React hook for managing passkeys (list, remove)
  */
 export function useManagePasskeys(config: ClientConfig): ManagePasskeysHook {
   const [loading, setLoading] = useState(false);
@@ -52,7 +52,7 @@ export function useManagePasskeys(config: ClientConfig): ManagePasskeysHook {
   );
 
   const remove = useCallback(
-    async (credentialId: string): Promise<void> => {
+    async (userId: string, credentialId: string): Promise<void> => {
       setLoading(true);
       setError(null);
 
@@ -63,7 +63,7 @@ export function useManagePasskeys(config: ClientConfig): ManagePasskeysHook {
             "Content-Type": "application/json",
           },
           credentials: "include",
-          body: JSON.stringify({ credentialId }),
+          body: JSON.stringify({ userId, credentialId }),
         });
 
         if (!response.ok) {

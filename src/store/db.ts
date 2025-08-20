@@ -1,4 +1,4 @@
-import type { ChallengeRecord, ChallengeStore, Flow } from "../types/index.js";
+import type { ChallengeRecord, ChallengeStore, Flow } from "../types/index";
 
 /**
  * Generic database client interface for challenge storage

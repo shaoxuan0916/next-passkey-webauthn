@@ -2,6 +2,6 @@
  * Server-side WebAuthn handlers
  */
 
-export { startRegistration, finishRegistration } from "./register.js";
-export { startAuthentication, finishAuthentication } from "./authenticate.js";
-export { deletePasskey, listUserPasskeys } from "./delete.js";
+export { startRegistration, finishRegistration } from "./register";
+export { startAuthentication, finishAuthentication } from "./authenticate";
+export { deletePasskey, listUserPasskeys } from "./delete";

@@ -1,280 +1,135 @@
-# next-passkey-webauthn
+# Next-Passkey Documentation
 
-A focused, minimal, and extensible **Passkey (WebAuthn)** SDK for Next.js applications.
+Welcome to the Next-Passkey-Webauthn documentation! This package provides a focused, minimal, and extensible **Passkey (WebAuthn)** SDK for Next.js applications.
 
-[![npm version](https://badge.fury.io/js/next-passkey-webauthn.svg)](https://badge.fury.io/js/next-passkey-webauthn)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+## What is Next-Passkey-Webauthn?
 
-## ✨ Features
+Next-Passkey-Webauthn is a comprehensive WebAuthn solution that provides:
 
-- 🔐 **Complete WebAuthn Implementation** - Registration and authentication flows
-- 🧩 **Pluggable Architecture** - Swap storage adapters and challenge stores  
-- ⚡ **Ready-to-use React Hooks** - Simple client-side integration
-- 🛡️ **Type Safe** - Full TypeScript support with IntelliSense
-- 🏗️ **Framework Agnostic Server** - Works with any Next.js API setup
-- 📦 **Multiple Storage Options** - Prisma, Supabase, Redis, or custom adapters
-- 🚀 **Production Ready** - Comprehensive error handling and security
+- **Client-side**: Lightweight React hooks that wrap `@simplewebauthn/browser`
+- **Server-side**: Small utilities/handlers that wrap `@simplewebauthn/server`
+- **Persistence**: Pluggable adapters for credential storage (Prisma/Postgres, Supabase)
+- **Challenge Storage**: Flexible challenge stores (Redis, Database, in-memory)
+- **Type Safety**: Full TypeScript support with comprehensive type definitions
 
-## 🚀 Quick Start
+## Quick Start
 
-### Installation
+Choose your preferred setup from the guides below:
+
+### 🚀 Setup Guides
+
+- **[Supabase + Redis](./docs/supabase-redis-setup.md)** - **Recommended for production**
+  - Supabase PostgreSQL for credential storage
+  - Redis for fast challenge storage
+  - Scales across multiple nodes
+
+- **[Prisma + Redis](./docs/prisma-redis-setup.md)** - **Coming soon**
+  - Prisma ORM with PostgreSQL
+  - Redis for challenge storage
+  - Full type safety with Prisma
+
+- **[Supabase + Supabase Store](./docs/supabase-store-setup.md)** - **Coming soon**
+  - All-in-one Supabase solution
+  - PostgreSQL for both credentials and challenges
+  - Simple deployment
+
+- **[Prisma + Database Store](./docs/prisma-db-setup.md)** - **Coming soon**
+  - Prisma ORM with PostgreSQL
+  - Database-backed challenge storage
+  - No external dependencies
+
+## Architecture Overview
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Client Side   │    │   Server Side   │    │   Storage       │
+│                 │    │                 │    │                 │
+│ React Hooks     │◄──►│ WebAuthn        │◄──►│ Adapters        │
+│ Device Detection│    │ Handlers        │    │ Challenge       │
+│ Error Handling  │    │ Validation      │    │ Stores          │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+## Key Features
+
+### 🔐 WebAuthn Support
+- **Registration**: Create new passkeys with device detection
+- **Authentication**: Secure login with existing passkeys
+- **Management**: List, delete, and manage user passkeys
+- **Multi-device**: Support for multiple authenticators per user
+
+### 🏗️ Pluggable Architecture
+- **Adapters**: Switch between Prisma, Supabase, or custom implementations
+- **Stores**: Choose between Redis, Database, or other challenge storage
+- **Configuration**: Flexible relying party and security settings
+
+### 🎯 Developer Experience
+- **TypeScript First**: Complete type safety and IntelliSense
+- **React Hooks**: Simple, declarative API for components
+- **Error Handling**: Comprehensive error types and messages
+- **Device Detection**: Automatic device and browser information
+
+## Core Concepts
+
+### Flow Types
+- **Registration**: Creating new passkey credentials
+- **Authentication**: Using existing passkeys to login
+
+### Storage Layers
+- **Credential Storage**: Persistent storage of passkey data
+- **Challenge Storage**: Temporary storage during WebAuthn flows
+
+### Security Features
+- **Challenge Verification**: Prevents replay attacks
+- **Origin Validation**: Ensures requests come from trusted domains
+- **Counter Management**: Tracks authenticator usage
+
+## Installation
 
 ```bash
 npm install next-passkey-webauthn
 ```
 
-### Basic Setup
-
-#### 1. Configure Server
-
-```typescript
-// lib/passkey-config.ts
-import { PrismaAdapter } from "next-passkey-webauthn/adapters";
-import { MemoryStore } from "next-passkey-webauthn/store";
-import { PrismaClient } from "@prisma/client";
-
-const prisma = new PrismaClient();
-
-export const passkeyConfig = {
-  adapter: new PrismaAdapter(prisma),
-  store: new MemoryStore(), // Use RedisStore in production
-  rpConfig: {
-    rpID: "localhost", // your domain
-    rpName: "Your App",
-    expectedOrigin: ["http://localhost:3000"], // your origin
-  },
-};
-```
-
-#### 2. Create API Routes
-
-```typescript
-// app/api/passkey/register/start/route.ts
-import { startRegistration } from "next-passkey-webauthn/server";
-import { passkeyConfig } from "@/lib/passkey-config";
-
-export async function POST(request: Request) {
-  const { userId } = await request.json();
-  
-  try {
-    const options = await startRegistration(userId, passkeyConfig);
-    return Response.json(options);
-  } catch (error) {
-    return Response.json({ error: error.message }, { status: 400 });
-  }
-}
-```
-
-#### 3. Use React Hooks
-
-```tsx
-// components/PasskeyAuth.tsx
-import { useRegisterPasskey, useAuthenticatePasskey } from "next-passkey-webauthn/client";
-
-const endpoints = {
-  registerStart: "/api/passkey/register/start",
-  registerFinish: "/api/passkey/register/finish",
-  authenticateStart: "/api/passkey/authenticate/start", 
-  authenticateFinish: "/api/passkey/authenticate/finish",
-  deletePasskey: "/api/passkey/delete",
-  listPasskeys: "/api/passkey/list",
-};
-
-export function PasskeyAuth({ userId }: { userId: string }) {
-  const { register, loading: registerLoading } = useRegisterPasskey({ endpoints });
-  const { authenticate, loading: authLoading } = useAuthenticatePasskey({ endpoints });
-
-  const handleRegister = async () => {
-    try {
-      const result = await register(userId);
-      if (result.verified) {
-        console.log("Passkey registered!", result.credential);
-      }
-    } catch (error) {
-      console.error("Registration failed:", error);
-    }
-  };
-
-  const handleAuthenticate = async () => {
-    try {
-      const result = await authenticate(userId);
-      if (result.verified) {
-        console.log("Authentication successful!", result.credential);
-      }
-    } catch (error) {
-      console.error("Authentication failed:", error);
-    }
-  };
-
-  return (
-    <div>
-      <button onClick={handleRegister} disabled={registerLoading}>
-        {registerLoading ? "Registering..." : "Register Passkey"}
-      </button>
-      
-      <button onClick={handleAuthenticate} disabled={authLoading}>
-        {authLoading ? "Authenticating..." : "Sign In with Passkey"}
-      </button>
-    </div>
-  );
-}
-```
-
-## 📚 Documentation
-
-- **[Getting Started](./docs/getting-started.md)** - Complete setup guide
-- **[Database Setup](./docs/database-setup.md)** - Prisma, Supabase schemas
-- **[API Reference](./docs/api-reference.md)** - Complete function documentation
-- **[Client Hooks](./docs/client-hooks.md)** - React hooks guide
-- **[Examples](./docs/examples.md)** - Complete integration examples
-- **[Security Guide](./docs/security.md)** - Production security considerations
-
-## 🏗️ Architecture
-
-### Import Structure
-
-```typescript
-// Server-side functions
-import { startRegistration, finishRegistration } from "next-passkey-webauthn/server";
-
-// Client-side hooks  
-import { useRegisterPasskey, useAuthenticatePasskey } from "next-passkey-webauthn/client";
-
-// Storage adapters
-import { PrismaAdapter, SupabaseAdapter } from "next-passkey-webauthn/adapters";
-
-// Challenge stores
-import { MemoryStore, RedisStore, DbStore } from "next-passkey-webauthn/store";
-
-// Types
-import type { StoredCredential, PasskeyAdapter } from "next-passkey-webauthn/types";
-```
-
-### Core Components
-
-#### **Credential Storage (Required)**
-Choose one adapter for storing passkey credentials:
-- **PrismaAdapter** - PostgreSQL, MySQL, SQLite via Prisma ORM
-- **SupabaseAdapter** - PostgreSQL via Supabase  
-- **Custom** - Implement `PasskeyAdapter` interface
-
-#### **Challenge Storage (Required)**
-Choose one store for temporary challenge storage:
-- **MemoryStore** - In-memory (development only)
-- **RedisStore** - Redis with TTL (production recommended)
-- **DbStore** - Database table (production alternative)
-
-## 🔧 Configuration
-
-### Environment Variables
-
-```env
-# Database (if using PrismaAdapter)
-DATABASE_URL="postgresql://..."
-
-# Redis (if using RedisStore)
-REDIS_URL="redis://localhost:6379"
-
-# Supabase (if using SupabaseAdapter)
-NEXT_PUBLIC_SUPABASE_URL="https://your-project.supabase.co"
-SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-```
-
-### Production Configuration
-
-```typescript
-// lib/passkey-config.ts (Production)
-import { PrismaAdapter } from "next-passkey-webauthn/adapters";
-import { RedisStore } from "next-passkey-webauthn/store";
-import { PrismaClient } from "@prisma/client";
-import { createClient } from "redis";
-
-const prisma = new PrismaClient();
-const redis = createClient({ url: process.env.REDIS_URL });
-await redis.connect();
-
-export const passkeyConfig = {
-  adapter: new PrismaAdapter(prisma),
-  store: new RedisStore(redis),
-  rpConfig: {
-    rpID: "yourdomain.com",
-    rpName: "Your App",
-    expectedOrigin: ["https://yourdomain.com"],
-  },
-};
-```
-
-## 🛡️ Security Features
-
-- ✅ **Origin Validation** - Prevents cross-origin attacks
-- ✅ **RP ID Validation** - Domain verification
-- ✅ **Challenge TTL** - Short-lived challenges (5 minutes default)
-- ✅ **Counter Protection** - Anti-replay protection
-- ✅ **User Verification** - Optional biometric/PIN checks
-- ✅ **Base64URL Encoding** - Proper binary data handling
-
-## 🔄 API Overview
+## API Reference
 
 ### Server Functions
-
-```typescript
-// Registration flow
-const options = await startRegistration(userId, serverConfig);
-const result = await finishRegistration(userId, credential, serverConfig);
-
-// Authentication flow  
-const options = await startAuthentication(userId, serverConfig);
-const result = await finishAuthentication(userId, credential, serverConfig);
-
-// Management
-const passkeys = await listUserPasskeys(userId, serverConfig);
-await deletePasskey(userId, credentialId, serverConfig);
-```
+- `startRegistration()` - Begin passkey registration
+- `finishRegistration()` - Complete passkey registration
+- `startAuthentication()` - Begin passkey authentication
+- `finishAuthentication()` - Complete passkey authentication
+- `deletePasskey()` - Remove a passkey
+- `listUserPasskeys()` - Get user's passkeys
 
 ### Client Hooks
+- `useRegisterPasskey()` - Passkey registration
+- `useAuthenticatePasskey()` - Passkey authentication
+- `useManagePasskeys()` - Passkey management
 
-```typescript
-// Registration
-const { register, loading, error } = useRegisterPasskey({ endpoints });
-const result = await register(userId);
+### Adapters
+- `SupabaseAdapter` - Supabase PostgreSQL integration
+- `PrismaAdapter` - Prisma ORM integration
 
-// Authentication
-const { authenticate, loading, error } = useAuthenticatePasskey({ endpoints });
-const result = await authenticate(userId);
+### Challenge Stores
+- `RedisStore` - Redis-based challenge storage
+- `DbStore` - Database-based challenge storage
 
-// Management
-const { list, remove, loading, error } = useManagePasskeys({ endpoints });
-const passkeys = await list(userId);
-await remove(credentialId);
-```
+## Examples
 
-## 🎯 Examples
+Check out the setup guides for complete, working examples:
 
-### Complete Next.js App Router Setup
+- [Supabase + Redis Setup](./docs/supabase-redis-setup.md)
+- More guides coming soon...
 
-See [examples/nextjs-app-router](./docs/examples.md#nextjs-app-router) for a complete working example with:
-- Database setup (Prisma + PostgreSQL)
-- All API routes
-- React components
-- TypeScript configuration
+## Contributing
 
-### Pages Router Setup
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
 
-See [examples/nextjs-pages-router](./docs/examples.md#nextjs-pages-router) for Pages Router implementation.
+## Support
 
-## 🤝 Contributing
+- **Issues**: [GitHub Issues](https://github.com/shaoxuan0916/next-passkey-webauthn/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/shaoxuan0916/next-passkey-webauthn/discussions)
+- **Documentation**: This docs folder
 
-Contributions are welcome! Please read our [Contributing Guide](./CONTRIBUTING.md) for details.
+## License
 
-## 📄 License
-
-MIT © [shaoxuan0916](https://github.com/shaoxuan0916)
-
-## 🙏 Acknowledgments
-
-Built on top of the excellent [@simplewebauthn](https://github.com/MasterKale/SimpleWebAuthn) library.
-
----
-
-**Need help?** Check the [documentation](./docs/) or [open an issue](https://github.com/shaoxuan0916/next-passkey-webauthn/issues).
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.

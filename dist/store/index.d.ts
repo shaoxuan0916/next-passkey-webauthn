@@ -1,38 +1,6 @@
 import { ChallengeStore, ChallengeRecord, Flow } from '../types/index.js';
 
 /**
- * In-memory challenge store for development
- * Not suitable for production multi-node deployments
- */
-declare class MemoryStore implements ChallengeStore {
-    /** Cleanup interval in milliseconds (default: 60000 = 1 minute) */
-    private readonly cleanupIntervalMs;
-    private challenges;
-    private cleanupInterval?;
-    constructor(
-    /** Cleanup interval in milliseconds (default: 60000 = 1 minute) */
-    cleanupIntervalMs?: number);
-    set(record: ChallengeRecord): Promise<void>;
-    get(userId: string, flow: Flow): Promise<ChallengeRecord | null>;
-    delete(userId: string, flow: Flow): Promise<void>;
-    /**
-     * Get challenge count (for testing/debugging)
-     */
-    size(): number;
-    /**
-     * Clear all challenges (for testing)
-     */
-    clear(): void;
-    /**
-     * Stop cleanup interval and clear memory
-     */
-    destroy(): void;
-    private getChallengeKey;
-    private startCleanup;
-    private cleanupExpired;
-}
-
-/**
  * Redis client interface (compatible with node-redis, ioredis, etc.)
  */
 interface RedisClient {
@@ -41,10 +9,19 @@ interface RedisClient {
         EX?: number;
     }): Promise<string | null>;
     del(key: string): Promise<number>;
+    isOpen?: boolean;
+    ping?(): Promise<string>;
 }
 /**
- * Redis-based challenge store for production
- * Recommended for multi-node deploymentss
+ * Redis-based challenge store - RECOMMENDED for all environments
+ *
+ * Benefits:
+ * - Automatic TTL handling (no manual cleanup needed)
+ * - Excellent performance
+ * - Works perfectly in development with Docker
+ * - Production-ready for multi-node deployments
+ * - No database schema changes required
+ *
  */
 declare class RedisStore implements ChallengeStore {
     private readonly redis;
@@ -53,10 +30,31 @@ declare class RedisStore implements ChallengeStore {
     constructor(redis: RedisClient, 
     /** Default TTL in seconds (default: 300 = 5 minutes) */
     defaultTTL?: number);
+    private ensureConnection;
     set(record: ChallengeRecord): Promise<void>;
     get(userId: string, flow: Flow): Promise<ChallengeRecord | null>;
     delete(userId: string, flow: Flow): Promise<void>;
     private getChallengeKey;
+}
+
+/**
+ * Supabase-based challenge store for production use
+ * Stores challenges in a database table for persistence across server restarts
+ */
+declare class SupabaseStore implements ChallengeStore {
+    private readonly supabase;
+    /** Table name for challenges (default: "passkey_challenges") */
+    private readonly tableName;
+    constructor(supabase: any, // Compatible with @supabase/supabase-js
+    /** Table name for challenges (default: "passkey_challenges") */
+    tableName?: string);
+    set(record: ChallengeRecord): Promise<void>;
+    get(userId: string, flow: Flow): Promise<ChallengeRecord | null>;
+    delete(userId: string, flow: Flow): Promise<void>;
+    /**
+     * Clean up all expired challenges (optional maintenance method)
+     */
+    cleanupExpired(): Promise<void>;
 }
 
 /**
@@ -92,4 +90,4 @@ declare class DbStore implements ChallengeStore {
     private getChallengeId;
 }
 
-export { type DatabaseClient, DbStore, MemoryStore, type RedisClient, RedisStore };
+export { type DatabaseClient, DbStore, type RedisClient, RedisStore, SupabaseStore };

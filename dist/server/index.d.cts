@@ -1,14 +1,20 @@
 import { PublicKeyCredentialCreationOptionsJSON, RegistrationResponseJSON, PublicKeyCredentialRequestOptionsJSON, AuthenticationResponseJSON } from '@simplewebauthn/server';
-import { ServerOptions, RegistrationStartOptions, StoredCredential, AuthenticationStartOptions } from '../types/index.cjs';
+import { ServerOptions, RegistrationStartOptions, PasskeyDeviceInfo, PasskeyManagementOptions, StoredCredential, AuthenticationStartOptions } from '../types/index.cjs';
 
 /**
  * Start passkey registration flow
  */
-declare function startRegistration(userId: string, options: ServerOptions, registrationOptions?: RegistrationStartOptions): Promise<PublicKeyCredentialCreationOptionsJSON>;
+declare function startRegistration(userId: string, options: ServerOptions, registrationOptions?: RegistrationStartOptions & {
+    deviceInfo?: PasskeyDeviceInfo;
+    managementOptions?: PasskeyManagementOptions;
+}): Promise<PublicKeyCredentialCreationOptionsJSON>;
 /**
  * Complete passkey registration flow
  */
-declare function finishRegistration(userId: string, credential: RegistrationResponseJSON, options: ServerOptions, registrationOptions?: RegistrationStartOptions): Promise<{
+declare function finishRegistration(userId: string, credential: RegistrationResponseJSON, options: ServerOptions, registrationOptions?: RegistrationStartOptions & {
+    deviceInfo?: PasskeyDeviceInfo;
+    managementOptions?: PasskeyManagementOptions;
+}): Promise<{
     verified: boolean;
     credential?: StoredCredential;
 }>;

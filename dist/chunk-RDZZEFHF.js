@@ -1,108 +1,129 @@
-// src/store/memory.ts
-var MemoryStore = class {
-  constructor(cleanupIntervalMs = 6e4) {
-    this.cleanupIntervalMs = cleanupIntervalMs;
-    this.challenges = /* @__PURE__ */ new Map();
-    this.startCleanup();
-  }
-  async set(record) {
-    const key = this.getChallengeKey(record.userId, record.flow);
-    this.challenges.set(key, record);
-  }
-  async get(userId, flow) {
-    const key = this.getChallengeKey(userId, flow);
-    const record = this.challenges.get(key);
-    if (!record) {
-      return null;
-    }
-    if (Date.now() > record.expiresAt) {
-      this.challenges.delete(key);
-      return null;
-    }
-    return record;
-  }
-  async delete(userId, flow) {
-    const key = this.getChallengeKey(userId, flow);
-    this.challenges.delete(key);
-  }
-  /**
-   * Get challenge count (for testing/debugging)
-   */
-  size() {
-    return this.challenges.size;
-  }
-  /**
-   * Clear all challenges (for testing)
-   */
-  clear() {
-    this.challenges.clear();
-  }
-  /**
-   * Stop cleanup interval and clear memory
-   */
-  destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = void 0;
-    }
-    this.clear();
-  }
-  getChallengeKey(userId, flow) {
-    return `${userId}:${flow}`;
-  }
-  startCleanup() {
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupExpired();
-    }, this.cleanupIntervalMs);
-    this.cleanupInterval.unref?.();
-  }
-  cleanupExpired() {
-    const now = Date.now();
-    for (const [key, record] of this.challenges.entries()) {
-      if (now > record.expiresAt) {
-        this.challenges.delete(key);
-      }
-    }
-  }
-};
-
 // src/store/redis.ts
 var RedisStore = class {
   constructor(redis, defaultTTL = 300) {
     this.redis = redis;
     this.defaultTTL = defaultTTL;
   }
+  async ensureConnection() {
+    if (this.redis.isOpen === false) {
+      throw new Error(
+        "Redis client is not connected. Make sure to call redis.connect() before using RedisStore."
+      );
+    }
+  }
   async set(record) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(record.userId, record.flow);
     const value = JSON.stringify(record);
     const ttlSeconds = Math.ceil((record.expiresAt - Date.now()) / 1e3);
     const finalTTL = Math.min(Math.max(ttlSeconds, 1), this.defaultTTL);
-    await this.redis.set(key, value, { EX: finalTTL });
+    try {
+      await this.redis.set(key, value, { EX: finalTTL });
+    } catch (error) {
+      throw new Error(
+        `Failed to store challenge in Redis: ${error instanceof Error ? error.message : String(error)}. Check your Redis connection and ensure the client is properly connected.`
+      );
+    }
   }
   async get(userId, flow) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(userId, flow);
-    const value = await this.redis.get(key);
-    if (!value) {
-      return null;
-    }
     try {
+      const value = await this.redis.get(key);
+      if (!value) {
+        return null;
+      }
       const record = JSON.parse(value);
       if (Date.now() > record.expiresAt) {
         await this.redis.del(key);
         return null;
       }
       return record;
-    } catch {
-      await this.redis.del(key);
-      return null;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await this.redis.del(key);
+        return null;
+      }
+      throw new Error(
+        `Failed to retrieve challenge from Redis: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
   async delete(userId, flow) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(userId, flow);
-    await this.redis.del(key);
+    try {
+      await this.redis.del(key);
+    } catch (error) {
+      throw new Error(
+        `Failed to delete challenge from Redis: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
   getChallengeKey(userId, flow) {
     return `passkey:challenge:${userId}:${flow}`;
+  }
+};
+
+// src/store/supabase.ts
+var SupabaseStore = class {
+  constructor(supabase, tableName = "passkey_challenges") {
+    this.supabase = supabase;
+    this.tableName = tableName;
+  }
+  async set(record) {
+    const { error } = await this.supabase.from(this.tableName).upsert({
+      id: record.id,
+      user_id: record.userId,
+      flow: record.flow,
+      challenge: record.challenge,
+      expires_at: new Date(record.expiresAt).toISOString()
+    });
+    if (error) {
+      throw new Error(`Failed to store challenge: ${error.message}`);
+    }
+  }
+  async get(userId, flow) {
+    const challengeId = `${userId}:${flow}`;
+    const { data, error } = await this.supabase.from(this.tableName).select("*").eq("id", challengeId).single();
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null;
+      }
+      throw new Error(`Failed to retrieve challenge: ${error.message}`);
+    }
+    if (!data) {
+      return null;
+    }
+    const expiresAt = new Date(data.expires_at).getTime();
+    if (Date.now() > expiresAt) {
+      await this.delete(userId, flow);
+      return null;
+    }
+    return {
+      id: data.id,
+      userId: data.user_id,
+      flow: data.flow,
+      challenge: data.challenge,
+      expiresAt
+    };
+  }
+  async delete(userId, flow) {
+    const challengeId = `${userId}:${flow}`;
+    const { error } = await this.supabase.from(this.tableName).delete().eq("id", challengeId);
+    if (error) {
+      throw new Error(`Failed to delete challenge: ${error.message}`);
+    }
+  }
+  /**
+   * Clean up all expired challenges (optional maintenance method)
+   */
+  async cleanupExpired() {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const { error } = await this.supabase.from(this.tableName).delete().lt("expires_at", now);
+    if (error) {
+      throw new Error(`Failed to cleanup expired challenges: ${error.message}`);
+    }
   }
 };
 
@@ -191,8 +212,8 @@ var DbStore = class {
 };
 
 export {
-  MemoryStore,
   RedisStore,
+  SupabaseStore,
   DbStore
 };
-//# sourceMappingURL=chunk-VAXUQYAM.js.map
+//# sourceMappingURL=chunk-RDZZEFHF.js.map

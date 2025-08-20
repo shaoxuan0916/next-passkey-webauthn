@@ -15,6 +15,11 @@ interface PrismaClient {
                 transports?: string[];
                 userName?: string;
                 userDisplayName?: string;
+                authenticatorAttachment?: string;
+                deviceInfo?: any;
+                backupEligible?: boolean;
+                backupState?: boolean;
+                lastUsedAt?: Date;
             };
         }): Promise<{
             id: string;
@@ -25,6 +30,11 @@ interface PrismaClient {
             transports: string[];
             userName?: string;
             userDisplayName?: string;
+            authenticatorAttachment?: string;
+            deviceInfo?: any;
+            backupEligible?: boolean;
+            backupState?: boolean;
+            lastUsedAt?: Date;
             createdAt: Date;
             updatedAt: Date;
         }>;
@@ -41,6 +51,11 @@ interface PrismaClient {
             transports: string[];
             userName?: string;
             userDisplayName?: string;
+            authenticatorAttachment?: string;
+            deviceInfo?: any;
+            backupEligible?: boolean;
+            backupState?: boolean;
+            lastUsedAt?: Date;
             createdAt: Date;
             updatedAt: Date;
         } | null>;
@@ -60,6 +75,11 @@ interface PrismaClient {
             transports: string[];
             userName?: string;
             userDisplayName?: string;
+            authenticatorAttachment?: string;
+            deviceInfo?: any;
+            backupEligible?: boolean;
+            backupState?: boolean;
+            lastUsedAt?: Date;
             createdAt: Date;
             updatedAt: Date;
         }>>;
@@ -107,99 +127,6 @@ declare class PrismaAdapter implements PasskeyAdapter {
 }
 
 /**
- * Supabase client interface for passkey operations
- * Compatible with @supabase/supabase-js
- */
-interface SupabaseClient {
-    from(table: string): {
-        insert(data: {
-            user_id: string;
-            credential_id: string;
-            public_key: string;
-            counter: number;
-            transports?: string[];
-            user_name?: string;
-            user_display_name?: string;
-        }): {
-            select(columns?: string): Promise<{
-                data: Array<{
-                    id: string;
-                    user_id: string;
-                    credential_id: string;
-                    public_key: string;
-                    counter: number;
-                    transports: string[] | null;
-                    user_name?: string;
-                    user_display_name?: string;
-                    created_at: string;
-                    updated_at: string;
-                }> | null;
-                error: {
-                    message: string;
-                } | null;
-            }>;
-        };
-        select(columns?: string): {
-            eq(column: string, value: string): Promise<{
-                data: Array<{
-                    id: string;
-                    user_id: string;
-                    credential_id: string;
-                    public_key: string;
-                    counter: number;
-                    transports: string[] | null;
-                    user_name?: string;
-                    user_display_name?: string;
-                    created_at: string;
-                    updated_at: string;
-                }> | null;
-                error: {
-                    message: string;
-                } | null;
-            }>;
-            order(column: string, options?: {
-                ascending: boolean;
-            }): {
-                eq(column: string, value: string): Promise<{
-                    data: Array<{
-                        id: string;
-                        user_id: string;
-                        credential_id: string;
-                        public_key: string;
-                        counter: number;
-                        transports: string[] | null;
-                        user_name?: string;
-                        user_display_name?: string;
-                        created_at: string;
-                        updated_at: string;
-                    }> | null;
-                    error: {
-                        message: string;
-                    } | null;
-                }>;
-            };
-        };
-        update(data: {
-            counter: number;
-        }): {
-            eq(column: string, value: string): Promise<{
-                data: unknown;
-                error: {
-                    message: string;
-                } | null;
-            }>;
-        };
-        delete(): {
-            eq(column: string, value: string): Promise<{
-                data: unknown;
-                error: {
-                    message: string;
-                } | null;
-            }>;
-        };
-    };
-}
-/**
  * Supabase adapter for passkey credential storage
  * Works with Supabase PostgreSQL database
  */
@@ -207,7 +134,7 @@ declare class SupabaseAdapter implements PasskeyAdapter {
     private readonly supabase;
     /** Table name for passkeys (default: "passkeys") */
     private readonly tableName;
-    constructor(supabase: SupabaseClient, 
+    constructor(supabase: any, // Use 'any' to be compatible with @supabase/supabase-js
     /** Table name for passkeys (default: "passkeys") */
     tableName?: string);
     createPasskey(data: Omit<StoredCredential, "id" | "createdAt">): Promise<StoredCredential>;
@@ -218,4 +145,4 @@ declare class SupabaseAdapter implements PasskeyAdapter {
     private mapSupabaseToStored;
 }
 
-export { PrismaAdapter, type PrismaClient, SupabaseAdapter, type SupabaseClient };
+export { PrismaAdapter, type PrismaClient, SupabaseAdapter };

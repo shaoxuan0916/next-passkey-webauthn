@@ -22,14 +22,18 @@ var src_exports = {};
 __export(src_exports, {
   DbStore: () => DbStore,
   ErrorCodes: () => ErrorCodes,
-  MemoryStore: () => MemoryStore,
   PasskeyError: () => PasskeyError,
   PrismaAdapter: () => PrismaAdapter,
   RedisStore: () => RedisStore,
   SupabaseAdapter: () => SupabaseAdapter,
+  SupabaseStore: () => SupabaseStore,
   deletePasskey: () => deletePasskey,
+  detectDeviceInfo: () => detectDeviceInfo2,
   finishAuthentication: () => finishAuthentication,
   finishRegistration: () => finishRegistration,
+  generatePasskeyNickname: () => generatePasskeyNickname,
+  getPasskeyIcon: () => getPasskeyIcon,
+  isSameAuthenticator: () => isSameAuthenticator,
   listUserPasskeys: () => listUserPasskeys,
   startAuthentication: () => startAuthentication,
   startRegistration: () => startRegistration,
@@ -64,6 +68,13 @@ var ErrorCodes = {
 async function startRegistration(userId, options, registrationOptions) {
   try {
     const existingCredentials = await options.adapter.listUserPasskeys(userId);
+    const managementOptions = registrationOptions?.managementOptions;
+    if (managementOptions?.maxPasskeysPerUser && existingCredentials.length >= managementOptions.maxPasskeysPerUser) {
+      throw new PasskeyError(
+        `Maximum number of passkeys (${managementOptions.maxPasskeysPerUser}) reached for this user`,
+        ErrorCodes.INVALID_INPUT
+      );
+    }
     const excludeCredentials = existingCredentials.map((cred) => ({
       id: cred.credentialId,
       type: "public-key",
@@ -75,7 +86,7 @@ async function startRegistration(userId, options, registrationOptions) {
       userID: Buffer.from(userId, "utf-8"),
       userName: registrationOptions?.userName || userId,
       userDisplayName: registrationOptions?.userDisplayName || userId,
-      timeout: registrationOptions?.timeout || 3e5,
+      timeout: registrationOptions?.timeout || 1e3 * 60 * 5,
       // 5 minutes
       attestationType: "none",
       excludeCredentials,
@@ -87,7 +98,7 @@ async function startRegistration(userId, options, registrationOptions) {
       supportedAlgorithmIDs: [-7, -257]
       // ES256, RS256
     });
-    const expiresAt = Date.now() + (registrationOptions?.timeout || 3e5);
+    const expiresAt = Date.now() + (registrationOptions?.timeout || 1e3 * 60 * 5);
     const challengeRecord = {
       id: `${userId}:registration`,
       userId,
@@ -138,15 +149,16 @@ async function finishRegistration(userId, credential, options, registrationOptio
     }
     const {
       credential: {
-        id: credentialID,
+        id: credentialId,
         publicKey: credentialPublicKey,
         counter,
         transports
-      }
+      },
+      credentialBackedUp,
+      credentialDeviceType
     } = verification.registrationInfo;
-    const credentialIdString = Buffer.from(credentialID).toString("base64url");
     const existingCredential = await options.adapter.findByCredentialId(
-      credentialIdString
+      credentialId
     );
     if (existingCredential) {
       throw new PasskeyError(
@@ -154,14 +166,50 @@ async function finishRegistration(userId, credential, options, registrationOptio
         ErrorCodes.INVALID_INPUT
       );
     }
+    let authenticatorAttachment;
+    const hasInternalTransport = transports?.includes("internal");
+    const isSingleDevice = credentialDeviceType === "singleDevice";
+    const deviceInfo = registrationOptions?.deviceInfo;
+    const isPlatformDevice = deviceInfo && (deviceInfo.os === "macOS" && deviceInfo.deviceType === "Mac" || deviceInfo.os === "iOS" && (deviceInfo.deviceType === "iPhone" || deviceInfo.deviceType === "iPad") || deviceInfo.os === "iPadOS" && deviceInfo.deviceType === "iPad" || deviceInfo.os === "Windows" && deviceInfo.deviceType === "Windows PC");
+    if (hasInternalTransport || isSingleDevice || isPlatformDevice) {
+      authenticatorAttachment = "platform";
+    } else {
+      authenticatorAttachment = "cross-platform";
+    }
+    const shouldPreventDuplicates = registrationOptions?.managementOptions?.preventDuplicateAuthenticators !== false && authenticatorAttachment === "platform";
+    if (shouldPreventDuplicates) {
+      const existingCredentials = await options.adapter.listUserPasskeys(
+        userId
+      );
+      const isDuplicate = existingCredentials.some((existing) => {
+        if (existing.authenticatorAttachment === "platform" && authenticatorAttachment === "platform") {
+          if (existing.deviceInfo && registrationOptions?.deviceInfo) {
+            return existing.deviceInfo.deviceType === registrationOptions.deviceInfo.deviceType && existing.deviceInfo.os === registrationOptions.deviceInfo.os;
+          }
+          return true;
+        }
+        return false;
+      });
+      if (isDuplicate) {
+        const deviceName = registrationOptions?.deviceInfo?.deviceType || "this device";
+        throw new PasskeyError(
+          `You already have a passkey on ${deviceName}. Each device can only have one passkey.`,
+          ErrorCodes.INVALID_INPUT
+        );
+      }
+    }
     const storedCredential = await options.adapter.createPasskey({
       userId,
-      credentialId: credentialID,
+      credentialId,
       publicKey: Buffer.from(credentialPublicKey).toString("base64url"),
       counter,
       transports,
       userName: registrationOptions?.userName,
-      userDisplayName: registrationOptions?.userDisplayName
+      userDisplayName: registrationOptions?.userDisplayName,
+      authenticatorAttachment,
+      deviceInfo: registrationOptions?.deviceInfo,
+      backupEligible: credentialBackedUp,
+      backupState: credentialBackedUp
     });
     return {
       verified: true,
@@ -194,19 +242,35 @@ async function startAuthentication(userId, options, authOptions) {
         ErrorCodes.CREDENTIAL_NOT_FOUND
       );
     }
-    const allowCredentials = userCredentials.map((cred) => ({
-      id: cred.credentialId,
-      type: "public-key",
-      transports: cred.transports
-    }));
-    const authenticationOpts = await (0, import_server2.generateAuthenticationOptions)({
-      rpID: options.rpConfig.rpID,
-      timeout: authOptions?.timeout || 3e5,
-      // 5 minutes
-      allowCredentials,
-      userVerification: authOptions?.userVerification || "preferred"
+    const allowCredentials = userCredentials.map((cred) => {
+      let credentialId = cred.credentialId;
+      return {
+        id: credentialId,
+        type: "public-key",
+        transports: cred.transports
+      };
     });
-    const expiresAt = Date.now() + (authOptions?.timeout || 3e5);
+    const hasPlatformAuthenticators = userCredentials.some(
+      (cred) => cred.authenticatorAttachment === "platform"
+    );
+    let finalUserVerification = authOptions?.userVerification || "preferred";
+    let finalTimeout = authOptions?.timeout || 1e3 * 60 * 5;
+    if (hasPlatformAuthenticators && !authOptions?.userVerification) {
+      finalUserVerification = "required";
+      finalTimeout = Math.min(finalTimeout, 1e3 * 60);
+    }
+    const webAuthnOptions = {
+      rpID: options.rpConfig.rpID,
+      timeout: finalTimeout,
+      userVerification: finalUserVerification
+    };
+    if (!hasPlatformAuthenticators) {
+      webAuthnOptions.allowCredentials = allowCredentials;
+    }
+    const authenticationOpts = await (0, import_server2.generateAuthenticationOptions)(
+      webAuthnOptions
+    );
+    const expiresAt = Date.now() + finalTimeout;
     const challengeRecord = {
       id: `${userId}:authentication`,
       userId,
@@ -241,7 +305,7 @@ async function finishAuthentication(userId, credential, options) {
       throw new PasskeyError("Challenge expired", ErrorCodes.CHALLENGE_EXPIRED);
     }
     const credentialIdString = credential.id;
-    const storedCredential = await options.adapter.findByCredentialId(
+    let storedCredential = await options.adapter.findByCredentialId(
       credentialIdString
     );
     if (!storedCredential) {
@@ -351,6 +415,39 @@ async function listUserPasskeys(userId, options) {
 // src/client/useRegisterPasskey.ts
 var import_browser = require("@simplewebauthn/browser");
 var import_react = require("react");
+function detectDeviceInfo() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") {
+    return {};
+  }
+  const ua = navigator.userAgent;
+  const deviceInfo = {};
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = /iPad/i.test(ua) ? "iPadOS" : "iOS";
+    deviceInfo.deviceType = /iPad/i.test(ua) ? "iPad" : "iPhone";
+  } else if (/Mac/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = "macOS";
+    deviceInfo.deviceType = "Mac";
+  } else if (/Windows/i.test(ua)) {
+    deviceInfo.os = "Windows";
+    deviceInfo.deviceType = "Windows PC";
+  } else if (/Android/i.test(ua)) {
+    deviceInfo.os = "Android";
+    deviceInfo.deviceType = "Android Device";
+  } else if (/Linux/i.test(ua)) {
+    deviceInfo.os = "Linux";
+    deviceInfo.deviceType = "Linux PC";
+  }
+  if (/Chrome/i.test(ua) && !/Edge/i.test(ua)) {
+    deviceInfo.browser = "Chrome";
+  } else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) {
+    deviceInfo.browser = "Safari";
+  } else if (/Firefox/i.test(ua)) {
+    deviceInfo.browser = "Firefox";
+  } else if (/Edge/i.test(ua)) {
+    deviceInfo.browser = "Edge";
+  }
+  return deviceInfo;
+}
 function useRegisterPasskey(config) {
   const [loading, setLoading] = (0, import_react.useState)(false);
   const [error, setError] = (0, import_react.useState)(null);
@@ -359,13 +456,21 @@ function useRegisterPasskey(config) {
       setLoading(true);
       setError(null);
       try {
+        const deviceInfo = detectDeviceInfo();
+        if (options?.nickname) {
+          deviceInfo.nickname = options.nickname;
+        }
         const startResponse = await fetch(config.endpoints.registerStart, {
           method: "POST",
           headers: {
             "Content-Type": "application/json"
           },
           credentials: "include",
-          body: JSON.stringify({ userId, ...options })
+          body: JSON.stringify({
+            userId,
+            ...options,
+            deviceInfo
+          })
         });
         if (!startResponse.ok) {
           const errorData = await startResponse.json();
@@ -416,7 +521,12 @@ function useRegisterPasskey(config) {
             "Content-Type": "application/json"
           },
           credentials: "include",
-          body: JSON.stringify({ userId, credential })
+          body: JSON.stringify({
+            userId,
+            credential,
+            deviceInfo,
+            managementOptions: options?.managementOptions
+          })
         });
         if (!finishResponse.ok) {
           const errorData = await finishResponse.json();
@@ -581,7 +691,7 @@ function useManagePasskeys(config) {
     [config.endpoints]
   );
   const remove = (0, import_react3.useCallback)(
-    async (credentialId) => {
+    async (userId, credentialId) => {
       setLoading(true);
       setError(null);
       try {
@@ -591,7 +701,7 @@ function useManagePasskeys(config) {
             "Content-Type": "application/json"
           },
           credentials: "include",
-          body: JSON.stringify({ credentialId })
+          body: JSON.stringify({ userId, credentialId })
         });
         if (!response.ok) {
           const errorData = await response.json();
@@ -618,6 +728,103 @@ function useManagePasskeys(config) {
   };
 }
 
+// src/utils/device-detection.ts
+function detectDeviceInfo2(userAgent) {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  const ua = userAgent || navigator.userAgent;
+  const deviceInfo = {};
+  if (/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = /iPad/i.test(ua) ? "iPadOS" : "iOS";
+    deviceInfo.deviceType = /iPad/i.test(ua) ? "iPad" : "iPhone";
+  } else if (/Mac/i.test(ua) && !/iPhone|iPad|iPod/i.test(ua)) {
+    deviceInfo.os = "macOS";
+    deviceInfo.deviceType = "Mac";
+  } else if (/Windows/i.test(ua)) {
+    deviceInfo.os = "Windows";
+    deviceInfo.deviceType = "Windows PC";
+  } else if (/Android/i.test(ua)) {
+    deviceInfo.os = "Android";
+    deviceInfo.deviceType = "Android Device";
+  } else if (/Linux/i.test(ua)) {
+    deviceInfo.os = "Linux";
+    deviceInfo.deviceType = "Linux PC";
+  }
+  if (/Chrome/i.test(ua) && !/Edge/i.test(ua)) {
+    deviceInfo.browser = "Chrome";
+  } else if (/Safari/i.test(ua) && !/Chrome/i.test(ua)) {
+    deviceInfo.browser = "Safari";
+  } else if (/Firefox/i.test(ua)) {
+    deviceInfo.browser = "Firefox";
+  } else if (/Edge/i.test(ua)) {
+    deviceInfo.browser = "Edge";
+  }
+  return deviceInfo;
+}
+function generatePasskeyNickname(deviceInfo, authenticatorAttachment) {
+  const { deviceType, os, browser } = deviceInfo;
+  if (authenticatorAttachment === "platform") {
+    if (os === "iOS" || os === "iPadOS") {
+      return deviceType === "iPad" ? "iPad Touch ID/Face ID" : "iPhone Touch ID/Face ID";
+    } else if (os === "macOS") {
+      return "Mac Touch ID";
+    } else if (os === "Windows") {
+      return "Windows Hello";
+    } else if (os === "Android") {
+      return "Android Biometric";
+    }
+  }
+  if (authenticatorAttachment === "cross-platform") {
+    return "Security Key";
+  }
+  if (deviceType && browser) {
+    return `${deviceType} (${browser})`;
+  } else if (deviceType) {
+    return deviceType;
+  } else if (os) {
+    return `${os} Device`;
+  }
+  return "Unknown Device";
+}
+function getPasskeyIcon(credential) {
+  const { authenticatorAttachment, deviceInfo, transports } = credential;
+  if (authenticatorAttachment === "platform") {
+    if (deviceInfo?.os === "iOS" || deviceInfo?.os === "iPadOS") {
+      return "\u{1F4F1}";
+    } else if (deviceInfo?.os === "macOS") {
+      return "\u{1F4BB}";
+    } else if (deviceInfo?.os === "Windows") {
+      return "\u{1F5A5}\uFE0F";
+    } else if (deviceInfo?.os === "Android") {
+      return "\u{1F4F1}";
+    }
+  }
+  if (authenticatorAttachment === "cross-platform") {
+    if (transports?.includes("usb")) {
+      return "\u{1F511}";
+    } else if (transports?.includes("nfc")) {
+      return "\u{1F4E1}";
+    } else if (transports?.includes("bluetooth")) {
+      return "\u{1F4F6}";
+    }
+    return "\u{1F510}";
+  }
+  return "\u{1F512}";
+}
+function isSameAuthenticator(credential1, credential2) {
+  if (credential1.authenticatorAttachment !== credential2.authenticatorAttachment) {
+    return false;
+  }
+  if (credential1.authenticatorAttachment === "platform") {
+    const device1 = credential1.deviceInfo;
+    const device2 = credential2.deviceInfo;
+    if (!device1 || !device2) return false;
+    return device1.deviceType === device2.deviceType && device1.os === device2.os;
+  }
+  return false;
+}
+
 // src/adapters/prisma.ts
 var PrismaAdapter = class {
   constructor(prisma) {
@@ -632,7 +839,13 @@ var PrismaAdapter = class {
         counter: data.counter,
         transports: data.transports || [],
         userName: data?.userName,
-        userDisplayName: data?.userDisplayName
+        userDisplayName: data?.userDisplayName,
+        // Enhanced metadata fields
+        authenticatorAttachment: data.authenticatorAttachment,
+        deviceInfo: data.deviceInfo,
+        backupEligible: data.backupEligible || false,
+        backupState: data.backupState || false,
+        lastUsedAt: data.lastUsedAt ? new Date(data.lastUsedAt) : void 0
       }
     });
     return this.mapPrismaToStored(result);
@@ -671,6 +884,13 @@ var PrismaAdapter = class {
       transports: prismaResult.transports,
       userName: prismaResult?.userName || void 0,
       userDisplayName: prismaResult?.userDisplayName || void 0,
+      // Enhanced metadata fields
+      authenticatorAttachment: prismaResult.authenticatorAttachment || void 0,
+      deviceInfo: prismaResult.deviceInfo || void 0,
+      backupEligible: prismaResult.backupEligible || void 0,
+      backupState: prismaResult.backupState || void 0,
+      lastUsedAt: prismaResult.lastUsedAt?.toISOString() || void 0,
+      // Standard timestamps
       createdAt: prismaResult.createdAt.toISOString(),
       updatedAt: prismaResult.updatedAt.toISOString()
     };
@@ -684,15 +904,22 @@ var SupabaseAdapter = class {
     this.tableName = tableName;
   }
   async createPasskey(data) {
-    const { data: result, error } = await this.supabase.from(this.tableName).insert({
+    const insertData = {
       user_id: data.userId,
       credential_id: data.credentialId,
       public_key: data.publicKey,
       counter: data.counter,
       transports: data.transports || [],
       user_name: data?.userName,
-      user_display_name: data?.userDisplayName
-    }).select();
+      user_display_name: data?.userDisplayName,
+      // Enhanced metadata fields
+      authenticator_attachment: data.authenticatorAttachment,
+      device_info: data.deviceInfo || {},
+      backup_eligible: data.backupEligible || false,
+      backup_state: data.backupState || false,
+      last_used_at: data.lastUsedAt ? new Date(data.lastUsedAt).toISOString() : null
+    };
+    const { data: result, error } = await this.supabase.from(this.tableName).insert(insertData).select();
     if (error) {
       throw new Error(`Failed to create passkey: ${error.message}`);
     }
@@ -743,77 +970,16 @@ var SupabaseAdapter = class {
       transports: supabaseResult.transports || void 0,
       userName: supabaseResult?.user_name || void 0,
       userDisplayName: supabaseResult?.user_display_name || void 0,
+      // Enhanced metadata fields
+      authenticatorAttachment: supabaseResult.authenticator_attachment || void 0,
+      deviceInfo: supabaseResult.device_info || void 0,
+      backupEligible: supabaseResult.backup_eligible || void 0,
+      backupState: supabaseResult.backup_state || void 0,
+      lastUsedAt: supabaseResult.last_used_at || void 0,
+      // Standard timestamps
       createdAt: supabaseResult.created_at,
       updatedAt: supabaseResult.updated_at
     };
-  }
-};
-
-// src/store/memory.ts
-var MemoryStore = class {
-  constructor(cleanupIntervalMs = 6e4) {
-    this.cleanupIntervalMs = cleanupIntervalMs;
-    this.challenges = /* @__PURE__ */ new Map();
-    this.startCleanup();
-  }
-  async set(record) {
-    const key = this.getChallengeKey(record.userId, record.flow);
-    this.challenges.set(key, record);
-  }
-  async get(userId, flow) {
-    const key = this.getChallengeKey(userId, flow);
-    const record = this.challenges.get(key);
-    if (!record) {
-      return null;
-    }
-    if (Date.now() > record.expiresAt) {
-      this.challenges.delete(key);
-      return null;
-    }
-    return record;
-  }
-  async delete(userId, flow) {
-    const key = this.getChallengeKey(userId, flow);
-    this.challenges.delete(key);
-  }
-  /**
-   * Get challenge count (for testing/debugging)
-   */
-  size() {
-    return this.challenges.size;
-  }
-  /**
-   * Clear all challenges (for testing)
-   */
-  clear() {
-    this.challenges.clear();
-  }
-  /**
-   * Stop cleanup interval and clear memory
-   */
-  destroy() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = void 0;
-    }
-    this.clear();
-  }
-  getChallengeKey(userId, flow) {
-    return `${userId}:${flow}`;
-  }
-  startCleanup() {
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupExpired();
-    }, this.cleanupIntervalMs);
-    this.cleanupInterval.unref?.();
-  }
-  cleanupExpired() {
-    const now = Date.now();
-    for (const [key, record] of this.challenges.entries()) {
-      if (now > record.expiresAt) {
-        this.challenges.delete(key);
-      }
-    }
   }
 };
 
@@ -823,37 +989,126 @@ var RedisStore = class {
     this.redis = redis;
     this.defaultTTL = defaultTTL;
   }
+  async ensureConnection() {
+    if (this.redis.isOpen === false) {
+      throw new Error(
+        "Redis client is not connected. Make sure to call redis.connect() before using RedisStore."
+      );
+    }
+  }
   async set(record) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(record.userId, record.flow);
     const value = JSON.stringify(record);
     const ttlSeconds = Math.ceil((record.expiresAt - Date.now()) / 1e3);
     const finalTTL = Math.min(Math.max(ttlSeconds, 1), this.defaultTTL);
-    await this.redis.set(key, value, { EX: finalTTL });
+    try {
+      await this.redis.set(key, value, { EX: finalTTL });
+    } catch (error) {
+      throw new Error(
+        `Failed to store challenge in Redis: ${error instanceof Error ? error.message : String(error)}. Check your Redis connection and ensure the client is properly connected.`
+      );
+    }
   }
   async get(userId, flow) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(userId, flow);
-    const value = await this.redis.get(key);
-    if (!value) {
-      return null;
-    }
     try {
+      const value = await this.redis.get(key);
+      if (!value) {
+        return null;
+      }
       const record = JSON.parse(value);
       if (Date.now() > record.expiresAt) {
         await this.redis.del(key);
         return null;
       }
       return record;
-    } catch {
-      await this.redis.del(key);
-      return null;
+    } catch (error) {
+      if (error instanceof SyntaxError) {
+        await this.redis.del(key);
+        return null;
+      }
+      throw new Error(
+        `Failed to retrieve challenge from Redis: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
   async delete(userId, flow) {
+    await this.ensureConnection();
     const key = this.getChallengeKey(userId, flow);
-    await this.redis.del(key);
+    try {
+      await this.redis.del(key);
+    } catch (error) {
+      throw new Error(
+        `Failed to delete challenge from Redis: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
   getChallengeKey(userId, flow) {
     return `passkey:challenge:${userId}:${flow}`;
+  }
+};
+
+// src/store/supabase.ts
+var SupabaseStore = class {
+  constructor(supabase, tableName = "passkey_challenges") {
+    this.supabase = supabase;
+    this.tableName = tableName;
+  }
+  async set(record) {
+    const { error } = await this.supabase.from(this.tableName).upsert({
+      id: record.id,
+      user_id: record.userId,
+      flow: record.flow,
+      challenge: record.challenge,
+      expires_at: new Date(record.expiresAt).toISOString()
+    });
+    if (error) {
+      throw new Error(`Failed to store challenge: ${error.message}`);
+    }
+  }
+  async get(userId, flow) {
+    const challengeId = `${userId}:${flow}`;
+    const { data, error } = await this.supabase.from(this.tableName).select("*").eq("id", challengeId).single();
+    if (error) {
+      if (error.code === "PGRST116") {
+        return null;
+      }
+      throw new Error(`Failed to retrieve challenge: ${error.message}`);
+    }
+    if (!data) {
+      return null;
+    }
+    const expiresAt = new Date(data.expires_at).getTime();
+    if (Date.now() > expiresAt) {
+      await this.delete(userId, flow);
+      return null;
+    }
+    return {
+      id: data.id,
+      userId: data.user_id,
+      flow: data.flow,
+      challenge: data.challenge,
+      expiresAt
+    };
+  }
+  async delete(userId, flow) {
+    const challengeId = `${userId}:${flow}`;
+    const { error } = await this.supabase.from(this.tableName).delete().eq("id", challengeId);
+    if (error) {
+      throw new Error(`Failed to delete challenge: ${error.message}`);
+    }
+  }
+  /**
+   * Clean up all expired challenges (optional maintenance method)
+   */
+  async cleanupExpired() {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const { error } = await this.supabase.from(this.tableName).delete().lt("expires_at", now);
+    if (error) {
+      throw new Error(`Failed to cleanup expired challenges: ${error.message}`);
+    }
   }
 };
 
@@ -944,14 +1199,18 @@ var DbStore = class {
 0 && (module.exports = {
   DbStore,
   ErrorCodes,
-  MemoryStore,
   PasskeyError,
   PrismaAdapter,
   RedisStore,
   SupabaseAdapter,
+  SupabaseStore,
   deletePasskey,
+  detectDeviceInfo,
   finishAuthentication,
   finishRegistration,
+  generatePasskeyNickname,
+  getPasskeyIcon,
+  isSameAuthenticator,
   listUserPasskeys,
   startAuthentication,
   startRegistration,

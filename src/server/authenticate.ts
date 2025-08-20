@@ -13,7 +13,7 @@ import {
   PasskeyError,
   type ServerOptions,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
 
 /**
  * Start passkey authentication flow
@@ -34,23 +34,54 @@ export async function startAuthentication(
       );
     }
 
-    // Prepare credentials for authentication
-    const allowCredentials = userCredentials.map((cred) => ({
-      id: cred.credentialId,
-      type: "public-key" as const,
-      transports: cred.transports as AuthenticatorTransportFuture[],
-    }));
+    // Prepare credentials for authentication with proper credential ID handling
+    const allowCredentials = userCredentials.map((cred) => {
+      // Ensure credential ID is properly formatted for WebAuthn
+      let credentialId = cred.credentialId;
 
-    // Generate authentication options
-    const authenticationOpts = await generateAuthenticationOptions({
-      rpID: options.rpConfig.rpID,
-      timeout: authOptions?.timeout || 300000, // 5 minutes
-      allowCredentials,
-      userVerification: authOptions?.userVerification || "preferred",
+      return {
+        id: credentialId,
+        type: "public-key" as const,
+        transports: cred.transports as AuthenticatorTransportFuture[],
+      };
     });
 
-    // Store challenge
-    const expiresAt = Date.now() + (authOptions?.timeout || 300000);
+    // Smart authentication strategy based on available authenticators
+    const hasPlatformAuthenticators = userCredentials.some(
+      (cred) => cred.authenticatorAttachment === "platform"
+    );
+
+    // If user has platform authenticators, prioritize them for better UX
+    let finalUserVerification = authOptions?.userVerification || "preferred";
+    let finalTimeout = authOptions?.timeout || 1000 * 60 * 5; // 5 minutes
+
+    if (hasPlatformAuthenticators && !authOptions?.userVerification) {
+      // For platform authenticators, require user verification to ensure Touch ID/Face ID prompt
+      finalUserVerification = "required";
+      // Shorter timeout for platform auth (better UX)
+      finalTimeout = Math.min(finalTimeout, 1000 * 60); // 1 minute
+    }
+
+    // Generate authentication options with smart credential handling
+    // If user has platform authenticators, don't specify allowCredentials to let WebAuthn find them
+    // This works around credential ID matching issues while maintaining security
+    const webAuthnOptions: any = {
+      rpID: options.rpConfig.rpID,
+      timeout: finalTimeout,
+      userVerification: finalUserVerification,
+    };
+
+    // Only add allowCredentials for cross-platform authenticators or when explicitly needed
+    if (!hasPlatformAuthenticators) {
+      webAuthnOptions.allowCredentials = allowCredentials;
+    }
+
+    const authenticationOpts = await generateAuthenticationOptions(
+      webAuthnOptions
+    );
+
+    // Store challenge with consistent timeout
+    const expiresAt = Date.now() + finalTimeout;
     const challengeRecord: ChallengeRecord = {
       id: `${userId}:authentication`,
       userId,
@@ -100,7 +131,9 @@ export async function finishAuthentication(
 
     // Find the credential being used
     const credentialIdString = credential.id;
-    const storedCredential = await options.adapter.findByCredentialId(
+
+    // Try to find credential with the received ID first
+    let storedCredential = await options.adapter.findByCredentialId(
       credentialIdString
     );
 

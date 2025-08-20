@@ -3,7 +3,7 @@ import {
   PasskeyError,
   type ServerOptions,
   type StoredCredential,
-} from "../types/index.js";
+} from "../types/index";
 
 /**
  * Delete a specific passkey credential
@@ -24,7 +24,6 @@ export async function deletePasskey(
       );
     }
 
-    // Verify the credential belongs to the user
     if (credential.userId !== userId) {
       throw new PasskeyError(
         "Credential does not belong to user",

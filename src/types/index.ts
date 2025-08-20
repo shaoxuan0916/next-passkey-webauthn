@@ -8,6 +8,25 @@
 export type Flow = "registration" | "authentication";
 
 /**
+ * Authenticator attachment type
+ */
+export type AuthenticatorAttachment = "platform" | "cross-platform";
+
+/**
+ * Passkey device information for better user experience
+ */
+export interface PasskeyDeviceInfo {
+  /** Device type (e.g., "iPhone", "MacBook", "Windows Hello", "YubiKey") */
+  deviceType?: string;
+  /** Operating system (e.g., "iOS", "macOS", "Windows", "Android") */
+  os?: string;
+  /** Browser used for registration (e.g., "Safari", "Chrome", "Firefox") */
+  browser?: string;
+  /** User-friendly name for the passkey */
+  nickname?: string;
+}
+
+/**
  * Stored credential data structure
  * Represents a passkey credential stored in the database
  */
@@ -28,6 +47,16 @@ export type StoredCredential = {
   userDisplayName?: string;
   /** Optional user name/identifier */
   userName?: string;
+  /** Authenticator attachment type */
+  authenticatorAttachment?: AuthenticatorAttachment;
+  /** Device and browser information for better UX */
+  deviceInfo?: PasskeyDeviceInfo;
+  /** Whether this is a backup eligible credential */
+  backupEligible?: boolean;
+  /** Whether this credential is currently backed up */
+  backupState?: boolean;
+  /** Last time this credential was used for authentication */
+  lastUsedAt?: string;
   /** ISO string of creation timestamp */
   createdAt: string;
   /** ISO string of last update timestamp */
@@ -176,6 +205,28 @@ export const ErrorCodes = {
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
 
 /**
+ * Passkey management options
+ */
+export interface PasskeyManagementOptions {
+  /** Prevent multiple passkeys from the same authenticator */
+  preventDuplicateAuthenticators?: boolean;
+  /** Maximum number of passkeys per user */
+  maxPasskeysPerUser?: number;
+  /** Require user verification for new registrations */
+  requireUserVerification?: boolean;
+}
+
+/**
+ * Enhanced registration options with device detection
+ */
+export interface EnhancedRegistrationOptions extends RegistrationStartOptions {
+  /** Device information to store with the credential */
+  deviceInfo?: PasskeyDeviceInfo;
+  /** Passkey management options */
+  managementOptions?: PasskeyManagementOptions;
+}
+
+/**
  * Client hook configuration
  */
 export interface ClientConfig {
@@ -235,5 +286,5 @@ export interface ManagePasskeysHook extends HookState {
   /** List user's passkeys */
   list: (userId: string) => Promise<StoredCredential[]>;
   /** Delete a passkey */
-  remove: (credentialId: string) => Promise<void>;
+  remove: (userId: string, credentialId: string) => Promise<void>;
 }

@@ -1,4 +1,8 @@
-import type { PasskeyAdapter, StoredCredential } from "../types/index.js";
+import type {
+  PasskeyAdapter,
+  StoredCredential,
+  AuthenticatorAttachment,
+} from "../types/index";
 
 /**
  * Prisma client interface for passkey operations
@@ -15,6 +19,12 @@ export interface PrismaClient {
         transports?: string[];
         userName?: string;
         userDisplayName?: string;
+        // Enhanced metadata fields
+        authenticatorAttachment?: string;
+        deviceInfo?: any;
+        backupEligible?: boolean;
+        backupState?: boolean;
+        lastUsedAt?: Date;
       };
     }): Promise<{
       id: string;
@@ -25,6 +35,11 @@ export interface PrismaClient {
       transports: string[];
       userName?: string;
       userDisplayName?: string;
+      authenticatorAttachment?: string;
+      deviceInfo?: any;
+      backupEligible?: boolean;
+      backupState?: boolean;
+      lastUsedAt?: Date;
       createdAt: Date;
       updatedAt: Date;
     }>;
@@ -38,6 +53,11 @@ export interface PrismaClient {
       transports: string[];
       userName?: string;
       userDisplayName?: string;
+      authenticatorAttachment?: string;
+      deviceInfo?: any;
+      backupEligible?: boolean;
+      backupState?: boolean;
+      lastUsedAt?: Date;
       createdAt: Date;
       updatedAt: Date;
     } | null>;
@@ -55,6 +75,11 @@ export interface PrismaClient {
         transports: string[];
         userName?: string;
         userDisplayName?: string;
+        authenticatorAttachment?: string;
+        deviceInfo?: any;
+        backupEligible?: boolean;
+        backupState?: boolean;
+        lastUsedAt?: Date;
         createdAt: Date;
         updatedAt: Date;
       }>
@@ -101,6 +126,12 @@ export class PrismaAdapter implements PasskeyAdapter {
         transports: data.transports || [],
         userName: data?.userName,
         userDisplayName: data?.userDisplayName,
+        // Enhanced metadata fields
+        authenticatorAttachment: data.authenticatorAttachment,
+        deviceInfo: data.deviceInfo,
+        backupEligible: data.backupEligible || false,
+        backupState: data.backupState || false,
+        lastUsedAt: data.lastUsedAt ? new Date(data.lastUsedAt) : undefined,
       },
     });
 
@@ -148,6 +179,11 @@ export class PrismaAdapter implements PasskeyAdapter {
     transports: string[];
     userName?: string;
     userDisplayName?: string;
+    authenticatorAttachment?: string;
+    deviceInfo?: any;
+    backupEligible?: boolean;
+    backupState?: boolean;
+    lastUsedAt?: Date;
     createdAt: Date;
     updatedAt: Date;
   }): StoredCredential {
@@ -160,6 +196,15 @@ export class PrismaAdapter implements PasskeyAdapter {
       transports: prismaResult.transports,
       userName: prismaResult?.userName || undefined,
       userDisplayName: prismaResult?.userDisplayName || undefined,
+      // Enhanced metadata fields
+      authenticatorAttachment:
+        (prismaResult.authenticatorAttachment as AuthenticatorAttachment) ||
+        undefined,
+      deviceInfo: prismaResult.deviceInfo || undefined,
+      backupEligible: prismaResult.backupEligible || undefined,
+      backupState: prismaResult.backupState || undefined,
+      lastUsedAt: prismaResult.lastUsedAt?.toISOString() || undefined,
+      // Standard timestamps
       createdAt: prismaResult.createdAt.toISOString(),
       updatedAt: prismaResult.updatedAt.toISOString(),
     };

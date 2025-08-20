@@ -1,7 +1,7 @@
 import {
   PrismaAdapter,
   SupabaseAdapter
-} from "../chunk-62DGVYXI.js";
+} from "../chunk-JJ7FVCVZ.js";
 export {
   PrismaAdapter,
   SupabaseAdapter
