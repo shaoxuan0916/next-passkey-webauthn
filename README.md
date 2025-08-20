@@ -24,22 +24,22 @@ Choose your preferred setup:
 
 ### 🚀 Setup Guides
 
-- **[Supabase + Redis](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/supabase-redis-setup.md)** - **Recommended for production**
+- **[Supabase + Redis](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/supabase-redis-setup.md)** - **Recommended for production**
   - Supabase PostgreSQL for credential storage
   - Redis for fast challenge storage
   - Scales across multiple nodes
 
-- **[Prisma + Redis](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/prisma-redis-setup.md)**
+- **[Prisma + Redis](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/prisma-redis-setup.md)**
   - Prisma ORM with PostgreSQL
   - Redis for challenge storage
   - Full type safety with Prisma
 
-- **[Supabase + Database Store](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/supabase-store-setup.md)**
+- **[Supabase + Database Store](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/supabase-store-setup.md)**
   - All-in-one Supabase solution
   - PostgreSQL for both credentials and challenges
   - Simple deployment
 
-- **[Prisma + Database Store](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/prisma-store-setup.md)**
+- **[Prisma + Database Store](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/prisma-store-setup.md)**
   - Prisma ORM with PostgreSQL
   - Database-backed challenge storage
   - No external dependencies
@@ -118,15 +118,15 @@ The architecture is designed to be modular - you can mix and match different ada
 
 Check out the setup guides for complete, working examples:
 
-- [Supabase + Redis Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/supabase-redis-setup.md)
-- [Prisma + Redis Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/prisma-redis-setup.md)
-- [Supabase + Database Store Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/supabase-store-setup.md)
-- [Prisma + Database Store Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/prisma-store-setup.md)
-- [API Reference](https://github.com/shaoxuan0916/next-passkey-webauthn/docs/api-reference.md)
+- [Supabase + Redis Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/supabase-redis-setup.md)
+- [Prisma + Redis Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/prisma-redis-setup.md)
+- [Supabase + Database Store Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/supabase-store-setup.md)
+- [Prisma + Database Store Setup](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/prisma-store-setup.md)
+- [API Reference](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/api-reference.md)
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](https://github.com/shaoxuan0916/next-passkey-webauthn/CONTRIBUTING.md) for details.
+We welcome contributions! Please see our [Contributing Guide](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/CONTRIBUTING.md) for details.
 
 ## Support
 
@@ -136,4 +136,4 @@ We welcome contributions! Please see our [Contributing Guide](https://github.com
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](https://github.com/shaoxuan0916/next-passkey-webauthn/LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/LICENSE) file for details.
