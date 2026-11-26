@@ -1,46 +1,69 @@
 # Next.js and PostgreSQL quickstart
 
-Add passkeys to an existing Next.js App Router application using its PostgreSQL database and session system. The SDK handles WebAuthn, verification attempts, storage, and the browser UI. Keep your existing login and recovery paths available during rollout.
+This guide adds passkeys to an existing Next.js App Router app. The SDK handles WebAuthn and stores passkeys in PostgreSQL. Your app still owns accounts, sign-in rules, sessions, and account recovery.
 
 ## Upgrading from 0.1.x or 0.2.x
 
-0.3.0 replaces the legacy APIs and starts with an empty PostgreSQL schema. Before switching sign-in, verify that every affected user has a working sign-in or recovery method independent of their old passkey. Preserve existing credential data during rollout and test fallback in a development environment. After the switch, users sign in through that method and enroll a new passkey.
+Version 0.3.0 replaces the old APIs and starts with a fresh PostgreSQL schema. It does not import existing passkeys. Before you switch, test your fallback in development and make sure everyone who uses an old passkey has another way to sign in or recover their account. Keep the old credential data during the rollout. After the switch, users can sign in with their fallback and add a new passkey.
 
-## 1. Install the SDK and prepare PostgreSQL
+## 1. Install the SDK and run the migration
 
-Use Node.js 20 or later and meet your Next.js version's Node.js requirement. Install the 0.3 release line from your app directory.
-
-```sh
-npm install next-passkey-webauthn@^0.3.0
-```
-
-To install from source, build a tarball from the 0.3.0 checkout.
+Use Node.js 20 or later, or a newer version if your Next.js release requires it. Run this command from your app directory.
 
 ```sh
-npm ci
-npm pack
+npm install next-passkey-webauthn@^0.3.1
 ```
 
-From your app directory, run `npm install /path/to/next-passkey-webauthn-0.3.0.tgz`. If your app needs a PostgreSQL driver, install `pg` and add `@types/pg` as a development dependency.
+If you're installing from source, run `npm ci` and `npm pack` in the SDK checkout. Then install the tarball from your app directory, for example with `npm install /path/to/next-passkey-webauthn-0.3.1.tgz`.
 
-Copy the packaged migration into your app's normal database migration workflow. The package exposes the SQL path for tools that need a filename.
+Use this command to find the SQL migration in the installed package.
 
 ```sh
 node -p "require.resolve('next-passkey-webauthn/migrations/001_passkeys.sql')"
 ```
 
-Apply it first to a development database. It creates a separate `next_passkey` schema. Keep it private to backend roles and grant the app role schema usage and the required table permissions. The runtime needs `SELECT`, `INSERT`, and `UPDATE` on `accounts`, and `SELECT`, `INSERT`, `UPDATE`, and `DELETE` on `credentials` and `attempts`. Use one connection pool per app process. Use a separate database for environments or apps with distinct account namespaces that share an RP ID.
+Copy the file into your app's migration workflow and apply it to a development database first. The migration creates a separate `next_passkey` schema. Give only backend roles access. Your app role needs `USAGE` on the schema and the table permissions below.
 
-## 2. Mount the route and connect application auth
+| Table | Permissions |
+| --- | --- |
+| `accounts` | `SELECT`, `INSERT`, `UPDATE` |
+| `credentials` | `SELECT`, `INSERT`, `UPDATE`, `DELETE` |
+| `attempts` | `SELECT`, `INSERT`, `UPDATE`, `DELETE` |
 
-Use `db` for your app's PostgreSQL pool and implement the `auth` methods with your server-side authentication code. For a working example with a local test session, see the reference app. [Example wiring](https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/examples/next-basic/lib/passkeys.ts)
+Reuse your existing PostgreSQL connection pool. If you need one, install `pg` and add `@types/pg` as a development dependency. Create one pool per app process, outside the route handler.
+
+```ts
+// lib/db.ts
+import { Pool } from "pg";
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) throw new Error("Set DATABASE_URL.");
+
+export const db = new Pool({ connectionString });
+```
+
+Use separate databases when apps or environments share a relying party ID (RP ID) but have different sets of account IDs.
+
+## 2. Add the passkey route
+
+For local development, add these values to `.env.local`.
+
+```dotenv
+PASSKEY_ORIGIN=http://localhost:3000
+PASSKEY_RP_ID=localhost
+```
+
+In production, use the exact HTTPS origin users see in the browser, with no trailing slash. For `https://app.example.com`, use `app.example.com` as the RP ID to restrict credentials to that host. You can also use a registrable parent domain such as `example.com`. Keep the RP ID stable across deployments. The route and UI must share the same origin.
+
+Create `app/api/passkeys/route.ts`. This example uses `@/` for imports within the app. The next sections show the three hooks imported here.
 
 ```ts
 // app/api/passkeys/route.ts
 import { createNextPasskeys } from "next-passkey-webauthn/next";
 import { PostgresPasskeyStore } from "next-passkey-webauthn/postgres";
-import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getSession, signIn } from "@/lib/passkey-auth";
+import { rateLimit } from "@/lib/passkey-rate-limit";
 
 export const runtime = "nodejs";
 
@@ -52,48 +75,168 @@ const passkeys = createNextPasskeys({
   rpId,
   rpName: "My app",
   store: new PostgresPasskeyStore(db),
-  getSession: (request) => auth.readPasskeySession(request),
-  signIn: (accountId, request) => auth.establishPasskeySession(accountId, request),
-  rateLimit: (request, scope) => scope === "request"
-    ? auth.allowPasskeyRequest(request)
-    : auth.allowPasskeyOperation(request, scope),
+  getSession,
+  signIn,
+  ...(origin.startsWith("https://") ? { rateLimit } : {}),
 });
 
 export const POST = passkeys.POST;
 ```
 
-- **`getSession`** returns `null` or `{ id, account: { id, name, displayName? }, authenticatedAt }` from a validated, active application session. Use a separate opaque session ID and rotate it on sign-in or reauthentication. Set `authenticatedAt` to the time of the last successful full authentication in epoch milliseconds and preserve it on routine session refreshes. Enrollment and revocation require authentication within 10 minutes. Use your existing flow when the SDK asks for fresh authentication.
-- **`signIn`** receives the account ID resolved from a verified passkey. Apply the existing login rules, including disabled-account and mandatory authentication policy, before issuing the application's normal fresh session. Return `true` after establishing the session, or `false` if policy declines it. In a Next.js route you can set the app's session cookie with `await cookies()`.
-- **`rateLimit`** is required over HTTPS. The `"request"` scope runs before the handler reads the body. Use it for a general request budget without reading the body in the hook. After validation, apply a separate budget for the named operation. Use verified client information and return `false` when either budget is exceeded. Configure request limits and read deadlines at the ingress as well. The handler caps reads at 64 KiB and returns HTTP 408 if the body takes more than 10 seconds to read. HTTP localhost can omit the hook for development.
+The `auth` methods in the next two examples stand for your app's server-side authentication code. The reference app shows both hooks wired to a working local session. [Reference app code](https://github.com/shaoxuan0916/next-passkey-webauthn/tree/main/examples/next-basic/lib)
 
-Locally, set `PASSKEY_ORIGIN=http://localhost:3000` and `PASSKEY_RP_ID=localhost`. In production, configure the exact HTTPS browser origin without a trailing slash. Use that hostname or a registrable parent domain as your relying-party ID. For `https://app.example.com`, `app.example.com` confines credentials to that host. Keep the RP ID stable across deployments. The route and UI run on the same origin.
+### `getSession` reads the current session
 
-Revocation takes effect on future passkey assertions. Existing sessions follow your application's session policy. Keep an independent authentication or recovery method available for users who revoke or lose all their passkeys.
+The SDK calls this hook when a user adds or manages passkeys. Verify the app session on the server and return `null` if it is missing, expired, or belongs to a deleted account.
 
-### Account deletion
+```ts
+// lib/passkey-auth.ts
+import type { PasskeySession } from "next-passkey-webauthn/next";
+import { auth } from "@/lib/auth";
 
-Use an immutable `account.id` that your application never reassigns. When deleting an account, invalidate its sessions and have both auth hooks reject the deleted account. Remove its passkey records for each RP ID the application uses. Run the following statements in a transaction using a backend role with `SELECT` and `DELETE` on `next_passkey.attempts` and `next_passkey.accounts`. Bind `$1` to the RP ID and `$2` to the deleted account ID. Deleting the SDK account row cascades to its credentials.
+export async function getSession(request: Request): Promise<PasskeySession | null> {
+  const session = await auth.readActiveSession(request);
+  if (!session) return null;
+
+  return {
+    id: session.id,
+    account: { id: session.user.id, name: session.user.email },
+    authenticatedAt: session.lastAuthenticatedAt.getTime(),
+  };
+}
+```
+
+Use an opaque session ID that stays the same across requests and changes after sign-in or reauthentication. The account ID is separate. It must be permanent and never reassigned. Use the email or username for `account.name`. You can also set `account.displayName`.
+
+`authenticatedAt` is the server-verified time of the last full authentication, in epoch milliseconds. Keep it unchanged on ordinary session refreshes. Adding or revoking a passkey requires authentication within the last 10 minutes. Use your existing sign-in flow if the user needs to authenticate again.
+
+### `signIn` starts a new session
+
+The SDK calls this hook with the verified passkey's account ID. Look up that account and apply your usual sign-in rules, including any mandatory extra verification. Return `true` only after your app has started a fresh session. Return `false` if the account or the sign-in policy blocks access.
+
+```ts
+// Add to lib/passkey-auth.ts
+export async function signIn(accountId: string, request: Request): Promise<boolean> {
+  const account = await auth.findAccountById(accountId);
+  if (!account || account.disabledAt) return false;
+
+  const allowed = await auth.canCompleteSignIn({ account, request, method: "passkey" });
+  if (!allowed) return false;
+
+  await auth.startSession({ accountId: account.id, request });
+  return true;
+}
+```
+
+Reuse the same session creation code your app uses after a successful sign-in. It should create a new session ID, record the authentication time, and set the app's session cookie. In an App Router route handler, the session helper can set the cookie with `await cookies()` from `next/headers`. [Next.js `cookies` reference](https://nextjs.org/docs/app/api-reference/functions/cookies)
+
+### `rateLimit` protects the HTTPS route
+
+HTTPS requires this hook. The SDK calls it first with `"request"` before reading the body. It calls the hook again with the operation name after validating the request. Use a separate budget for each scope. Leave the body unread in the hook.
+
+```ts
+// lib/passkey-rate-limit.ts
+import type { PasskeyOperation } from "next-passkey-webauthn/next";
+import { consumeRateLimit, getTrustedClientKey } from "@/lib/rate-limits";
+
+export async function rateLimit(request: Request, scope: PasskeyOperation | "request") {
+  const clientKey = getTrustedClientKey(request);
+  if (!clientKey) return false;
+
+  return consumeRateLimit({
+    key: `passkeys:${scope}:${clientKey}`,
+    limit: scope === "request" ? 120 : 30,
+    windowMs: 60_000,
+  });
+}
+```
+
+Replace the imports with your app's rate limiter. In this example, `getTrustedClientKey` reads a client key verified by your server or trusted proxy. `consumeRateLimit` checks and increments the request count atomically in a store shared by all app instances. It returns `false` when the budget is exhausted. Use limits that fit your app's traffic.
+
+Also set request limits and body read deadlines at your reverse proxy or load balancer. The SDK limits request bodies to 64 KiB and returns HTTP 408 if it takes more than 10 seconds to read the body. If you're only testing on HTTP localhost, you can leave the `rateLimit` import and option out until you configure them for HTTPS.
+
+### Revocation and account deletion
+
+Revoking a passkey blocks future sign-ins with that credential. Existing sessions follow your app's session policy. Keep another sign-in or recovery method available to users who lose or revoke all their passkeys.
+
+When you delete an account, invalidate its sessions and make sure both auth hooks reject it. Clean up the account's passkey records for each RP ID your app uses. Run these statements in a single transaction with a backend role that has `SELECT` and `DELETE` on both tables. Bind `$1` to the RP ID and `$2` to the account ID. PostgreSQL deletes the credentials when you delete the matching account row.
 
 ```sql
 DELETE FROM next_passkey.attempts WHERE rp_id = $1 AND account_id = $2;
 DELETE FROM next_passkey.accounts WHERE rp_id = $1 AND account_id = $2;
 ```
 
-## 3. Add sign-in and settings UI
+## 3. Add passkey sign-in and account settings
 
-Render `<PasskeySignIn />` alongside your existing login form. Render `<PasskeySettings />` in the signed-in account area. Import each component where you render it.
+Use `PasskeySignIn` next to your existing sign-in form. This example enables autofill using both the `autofill` prop and `autoComplete="username webauthn"` on the form's email field. The passkey button also works on its own with `<PasskeySignIn />`.
 
 ```tsx
-import { PasskeySettings, PasskeySignIn } from "next-passkey-webauthn/react";
+import { PasskeySignIn } from "next-passkey-webauthn/react";
+
+export function SignInOptions() {
+  return (
+    <>
+      <PasskeySignIn autofill />
+      <form action="/api/sign-in" method="post">
+        <label htmlFor="email">Email</label>
+        <input id="email" name="email" type="email" autoComplete="username webauthn" required />
+        <label htmlFor="password">Password</label>
+        <input id="password" name="password" type="password" autoComplete="current-password" required />
+        <button type="submit">Sign in with password</button>
+      </form>
+    </>
+  );
+}
 ```
 
-To enable browser autofill, set `autoComplete="username webauthn"` on the existing username or email field and render `<PasskeySignIn autofill />`. Explicit sign-in stays available. Both components default to `/api/passkeys`; set `endpoint` if the route uses another path. For custom UI, use `createPasskeyClient` from `next-passkey-webauthn/browser`.
+Use your existing form handler in place of `/api/sign-in`. Render `PasskeySettings` in the account area that already requires sign-in.
 
-## 4. Verify the integration
+```tsx
+import { PasskeySettings } from "next-passkey-webauthn/react";
 
-1. Sign in using the app's existing method and enroll a passkey. Confirm it appears in settings.
-2. Sign out and select **Sign in with a passkey**. Confirm the app restores the correct user's session without an account hint.
-3. Rename and revoke the passkey. Confirm the revoked passkey can no longer sign in, then sign back in through the original method.
-4. With a separate test account, confirm it cannot manage the first account's credentials.
+export function AccountPasskeys() {
+  return <PasskeySettings />;
+}
+```
 
-The reference app includes a Chromium and PostgreSQL test for enrollment, sign-in, credential management, and fallback. [Reference app](https://github.com/shaoxuan0916/next-passkey-webauthn/tree/main/examples/next-basic)
+Both components use `/api/passkeys` by default. If you put the route elsewhere, pass the matching `endpoint` to both components.
+
+### Use your own UI
+
+Create a browser client once and reuse it in your event handlers. This example signs in and reloads the page so it reflects the new session. Have the UI await the handler and display errors to the user.
+
+```ts
+import { createPasskeyClient, PasskeyRequestError } from "next-passkey-webauthn/browser";
+
+const passkeys = createPasskeyClient("/api/passkeys");
+
+export async function signInWithPasskey(): Promise<string | undefined> {
+  try {
+    await passkeys.signIn();
+    window.location.reload();
+  } catch (error) {
+    return error instanceof PasskeyRequestError
+      ? error.message
+      : "The passkey prompt could not be completed. Try again or use your usual sign-in method.";
+  }
+}
+```
+
+Use these calls for the rest of your UI. `id` comes from `list()`. After a change, call `list()` again to refresh the visible list.
+
+| Action | Example |
+| --- | --- |
+| Add a passkey from an active session | `await passkeys.enroll()` |
+| List the signed-in user's passkeys | `const rows = await passkeys.list()` |
+| Rename a passkey | `await passkeys.rename(id, "Work laptop")` |
+| Revoke a passkey after the user confirms | `await passkeys.revoke(id)` |
+| Cancel the current passkey prompt | `passkeys.cancel()` |
+
+## 4. Try the full flow
+
+1. Sign in with your existing method. Open account settings, add a passkey, and check that it appears in the list.
+2. Sign out. Select **Sign in with a passkey** without entering a username. Check that the app signs you in to the right account.
+3. Rename the passkey. Sign out and sign in to a second test account. Confirm that it cannot list, rename, or revoke the first account's passkey.
+4. Sign back in to the first account and revoke the passkey. Sign out and confirm that the passkey no longer works and your original sign-in method still does.
+
+The reference app has an automated test with Chromium and PostgreSQL that covers this flow. [Run the reference app and its tests](https://github.com/shaoxuan0916/next-passkey-webauthn/tree/main/examples/next-basic#smoke-test)

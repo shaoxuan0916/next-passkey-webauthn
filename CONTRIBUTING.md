@@ -24,11 +24,11 @@ The build generates `dist/`. The reference app links to this checkout, so rebuil
 
 ## Checks before a pull request
 
-From the repository root, run the SDK type check and build.
+From the repository root, run the SDK type check, build, and browser client test.
 
 ```sh
 npm exec -- tsc --noEmit
-npm run build
+npm test
 ```
 
 From `examples/next-basic`, run `npm ci`, `npm run typecheck`, and `npm run build`. For changes to the passkey flow, use a fresh test database and run the PostgreSQL and Chromium suite. [Test setup](examples/next-basic/README.md#smoke-test)
@@ -38,7 +38,7 @@ Keep pull requests focused. Explain user-visible changes and how you verified th
 ## Release process
 
 1. Match the package and lockfile versions and document upgrade requirements.
-2. From a clean checkout, run `npm ci` and `npm pack`. Inspect the archive for the built exports, quickstart, migration, and license. Install it in a separate project and verify the published entry points resolve.
+2. In a disposable release checkout, run `npm ci`, `cp docs/npm-readme.md README.md`, then `npm pack`. Inspect the archive for the npm README, built exports, quickstart, migration, and license. Install it in a separate project and verify the package entry points resolve.
 3. Push the release source before publishing so links in the package docs resolve. The maintainer publishes the verified archive with the `latest` tag and checks the registry result.
 4. Tag the release commit and create a GitHub release using the corresponding file in `docs/releases/`.
 

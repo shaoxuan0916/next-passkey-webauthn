@@ -44,7 +44,10 @@ export function createPasskeyClient(endpoint = "/api/passkeys") {
       signal,
       body: JSON.stringify({ operation, ...data }),
     });
-    const body: unknown = await result.json();
+    const body: unknown = await result.json().catch((error: unknown) => {
+      if (!result.ok && error instanceof SyntaxError) return null;
+      throw error;
+    });
     if (!result.ok) {
       const code = typeof body === "object" && body !== null && "error" in body &&
         typeof body.error === "string" ? body.error : "INTERNAL_ERROR";
