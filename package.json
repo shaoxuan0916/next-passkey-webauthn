@@ -1,6 +1,6 @@
 {
   "name": "next-passkey-webauthn",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "files": [
     "dist",
@@ -33,6 +33,7 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "npm run build && node --test test/browser.test.mjs",
     "prepack": "npm run build"
   },
   "keywords": [
