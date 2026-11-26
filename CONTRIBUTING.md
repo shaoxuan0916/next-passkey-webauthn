@@ -1,72 +1,51 @@
-# Contributing to Next-Passkey-Webauthn
+# Contributing to Next Passkey WebAuthn
 
-We welcome contributions! This guide will help you get started.
+## Development setup
 
-## Development Setup
+From the repository root, install the locked dependencies and build the SDK. The SDK requires Node.js 20 or later. The Next.js reference app requires Node.js 20.9 or later and a local PostgreSQL instance.
 
-1. **Fork and clone** the repository
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-3. **Build the project**:
-   ```bash
-   npm run build
-   ```
-## Project Structure
+```sh
+npm ci
+npm run build
+```
 
-src/
-├── adapters/ # Database adapters (Prisma, Supabase)
-├── client/ # React hooks and client-side logic
-├── server/ # Server-side WebAuthn handlers
-├── store/ # Challenge storage implementations
-├── types/ # Shared TypeScript interfaces
-└── utils/ # Utility functions
+The build generates `dist/`. The reference app links to this checkout, so rebuild the SDK after changing it.
 
-## Development Workflow
+## Project layout
 
-1. **Create a feature branch** from `main`
-2. **Make your changes** following the existing patterns
-3. **Add tests** for new functionality
-4. **Update documentation** if needed
-5. **Run the build** to ensure everything compiles
-6. **Submit a pull request**
+| Path | Responsibility |
+| --- | --- |
+| `src/server.ts` | WebAuthn verification and credential lifecycle |
+| `src/next.ts` | Next.js App Router handler and app session hooks |
+| `src/postgres.ts`, `migrations/` | PostgreSQL store and schema |
+| `src/browser.ts`, `src/react.tsx` | Browser client and React controls |
+| `src/types.ts` | Shared account and credential types |
+| `examples/next-basic/` | Local integration example and end-to-end tests |
 
-## Code Standards
+## Checks before a pull request
 
-- **TypeScript**: Use strict typing, avoid `any`
-- **Formatting**: Follow existing code style and patterns
-- **Architecture**: Keep concerns separated (client/server/storage)
-- **Error Handling**: Provide clear, actionable error messages
-- **Documentation**: Add JSDoc comments for public APIs
+From the repository root, run the SDK type check and build.
 
-## Testing
+```sh
+npm exec -- tsc --noEmit
+npm run build
+```
 
-- **Unit tests**: Test individual functions and components
-- **Integration tests**: Test adapter and store implementations
-- **Type checking**: Ensure TypeScript compilation passes
-- **Build verification**: Confirm the package builds correctly
+From `examples/next-basic`, run `npm ci`, `npm run typecheck`, and `npm run build`. For changes to the passkey flow, use a fresh test database and run the PostgreSQL and Chromium suite. [Test setup](examples/next-basic/README.md#smoke-test)
 
-## Pull Request Guidelines
+Keep pull requests focused. Explain user-visible changes and how you verified them. Update the quickstart and reference app when an integration contract changes. [Quickstart](docs/quickstart.md) · [Roadmap](docs/roadmap.md) · [Issue tracker](https://github.com/shaoxuan0916/next-passkey-webauthn/issues)
 
-- **Clear description** of what the PR accomplishes
-- **Reference issues** if fixing bugs or adding features
-- **Keep changes focused** - one logical change per PR
-- **Update documentation** for any API changes
-- **Test thoroughly** before submitting
+## Release process
 
-## Getting Help
+1. Match the package and lockfile versions and document upgrade requirements.
+2. From a clean checkout, run `npm ci` and `npm pack`. Inspect the archive for the built exports, quickstart, migration, and license. Install it in a separate project and verify the published entry points resolve.
+3. Push the release source before publishing so links in the package docs resolve. The maintainer publishes the verified archive with the `latest` tag and checks the registry result.
+4. Tag the release commit and create a GitHub release using the corresponding file in `docs/releases/`.
 
-- **Issues**: Check existing issues before creating new ones
-- **Discussions**: Use GitHub Discussions for questions
-- **Code Review**: All PRs require review before merging
+For 0.3.0, run the following after publishing the archive and confirming `npm view next-passkey-webauthn dist-tags.latest` reports `0.3.0`.
 
-## Release Process
-
-- **Version bump**: Use semantic versioning
-- **Changelog**: Document breaking changes and new features
-- **Publish**: Maintainer handles npm publishing
-
-## Questions?
-
-Feel free to open an issue or discussion if you need help getting started!
+```sh
+npm deprecate 'next-passkey-webauthn@0.1.x || 0.2.x' \
+  'This version is unsupported. Upgrade to next-passkey-webauthn 0.3.0 or later. Follow the upgrade guide to re-enroll existing passkeys. https://github.com/shaoxuan0916/next-passkey-webauthn/blob/main/docs/quickstart.md#upgrading-from-01x-or-02x'
+npm view 'next-passkey-webauthn@0.1.x || 0.2.x' version deprecated
+```

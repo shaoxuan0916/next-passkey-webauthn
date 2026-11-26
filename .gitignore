@@ -7,7 +7,8 @@ pnpm-debug.log*
 
 .cursor
 
-# Build outputs (keep dist/ for npm packages)
+# Build outputs
+/dist/
 build/
 *.tsbuildinfo
 

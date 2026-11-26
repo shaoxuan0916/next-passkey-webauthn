@@ -1,0 +1,25 @@
+{
+  "name": "next-passkey-basic-example",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --hostname localhost",
+    "build": "next build",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test:e2e": "node --test passkeys.test.mjs"
+  },
+  "dependencies": {
+    "next": "16.4.6",
+    "next-passkey-webauthn": "file:../..",
+    "pg": "8.23.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "8.23.1",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "playwright": "1.65.1",
+    "typescript": "^5.9.2"
+  }
+}

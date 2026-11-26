@@ -1,52 +1,39 @@
 {
   "name": "next-passkey-webauthn",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "type": "module",
-  "main": "dist/index.cjs",
-  "module": "dist/index.js",
-  "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "docs",
-    "README.md",
-    "LICENSE"
+    "docs/quickstart.md",
+    "migrations"
   ],
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    },
     "./server": {
-      "types": "./dist/server/index.d.ts",
       "import": "./dist/server/index.js",
       "require": "./dist/server/index.cjs"
     },
-    "./client": {
-      "types": "./dist/client/index.d.ts",
-      "import": "./dist/client/index.js",
-      "require": "./dist/client/index.cjs"
+    "./next": {
+      "import": "./dist/next/index.js",
+      "require": "./dist/next/index.cjs"
     },
-    "./adapters": {
-      "types": "./dist/adapters/index.d.ts",
-      "import": "./dist/adapters/index.js",
-      "require": "./dist/adapters/index.cjs"
+    "./postgres": {
+      "import": "./dist/postgres/index.js",
+      "require": "./dist/postgres/index.cjs"
     },
-    "./store": {
-      "types": "./dist/store/index.d.ts",
-      "import": "./dist/store/index.js",
-      "require": "./dist/store/index.cjs"
+    "./browser": {
+      "import": "./dist/browser/index.js",
+      "require": "./dist/browser/index.cjs"
     },
-    "./types": {
-      "types": "./dist/types/index.d.ts",
-      "import": "./dist/types/index.js",
-      "require": "./dist/types/index.cjs"
-    }
+    "./react": {
+      "import": "./dist/react/index.js",
+      "require": "./dist/react/index.cjs"
+    },
+    "./migrations/001_passkeys.sql": "./migrations/001_passkeys.sql"
   },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "prepublishOnly": "npm run build"
+    "prepack": "npm run build"
   },
   "keywords": [
     "next-passkey-webauthn",
@@ -58,21 +45,27 @@
   "author": "shaoxuan0916",
   "license": "MIT",
   "description": "Next.js library for Passkey authentication",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shaoxuan0916/next-passkey-webauthn.git"
+  },
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@types/react": "^19.1.10",
-    "eslint": "^9.33.0",
     "react": "^19.1.1",
     "tsup": "^8.5.0",
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "@simplewebauthn/browser": "^13.1.2",
-    "@simplewebauthn/server": "^13.1.2",
-    "zod": "^4.0.17"
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.3",
+    "tldts": "^7.6.0",
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
-    "react": ">=16.8.0",
-    "redis": "^4.7.0"
+    "react": ">=16.8.0"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
