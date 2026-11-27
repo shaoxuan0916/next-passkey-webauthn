@@ -4,6 +4,8 @@ Add passkey sign-in to a Next.js App Router app that uses PostgreSQL. Users can 
 
 The SDK verifies passkeys with WebAuthn, stores credentials in PostgreSQL, and provides React components for sign-in and account settings. It plugs into your existing accounts, sessions, and sign-in policy. Keep your current sign-in and recovery options available for anyone who loses a passkey or chooses not to use one.
 
+Create a demo passkey and use it to sign back in. **[Try the live demo](https://passkey.shaoxuan.dev)**
+
 ## Get started
 
 Use Node.js 20 or later, or a newer version if your Next.js release requires it. Install the SDK from your app directory.
