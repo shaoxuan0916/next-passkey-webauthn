@@ -1,6 +1,6 @@
 # Next.js and PostgreSQL reference app
 
-This example exercises the 0.3 SDK with a local PostgreSQL database, two test accounts, and a signed demo session cookie. Use your app's own authentication and recovery when integrating the SDK. [Quickstart](../../docs/quickstart.md)
+This example exercises the SDK with a local PostgreSQL database, individual guest accounts, and a signed demo session cookie. Two password-based accounts are available for testing the fallback flow. Use your app's own authentication and recovery when integrating the SDK. [Quickstart](../../docs/quickstart.md)
 
 ## Run locally
 
@@ -16,7 +16,22 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ../../migrations/001_passkeys.sql
 npm run dev
 ```
 
-Open `http://localhost:3000` and sign in as `one@example.test` or `two@example.test` using the value of `DEMO_PASSWORD`. Add a passkey, sign out, and use **Sign in with a passkey**. Rename and revoke it from settings, then verify that password sign-in still works.
+Open `http://localhost:3000` and select **Start demo**. Add a passkey, sign out, then use **Sign in with a passkey** to return to the same guest account. You can rename or revoke the key in settings.
+
+To try password sign-in or username autofill, open **How it works** and select **Use a local test account**. Sign in as `one@example.test` or `two@example.test` using `DEMO_PASSWORD`. These accounts are separate from guest accounts.
+
+## Deploy on Vercel
+
+Set the project's Root Directory to `examples/next-basic` and enable **Include source files outside of the Root Directory in the Build Step**. The example's Vercel config builds the SDK from the repository root before installing the app.
+
+Connect a dedicated PostgreSQL database and set `DATABASE_URL` to its pooled URL. Apply the schema and the demo's rate limit table using the database owner's connection string.
+
+```sh
+psql "$DIRECT_DATABASE_URL" -v ON_ERROR_STOP=1 -f ../../migrations/001_passkeys.sql
+psql "$DIRECT_DATABASE_URL" -v ON_ERROR_STOP=1 -f demo-rate-limits.sql
+```
+
+Set `DEMO_SESSION_SECRET` to a stable random value of at least 32 characters. In Production, set `APP_ORIGIN` to the permanent HTTPS URL with no trailing slash. Preview deployments can use their own Vercel deployment hostname via the system-provided `VERCEL_URL`. Passkeys are scoped to the hostname where they were enrolled. HTTPS deployments use guest accounts and PostgreSQL-backed rate limiting.
 
 ## Smoke test
 
