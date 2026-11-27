@@ -177,11 +177,16 @@ test("The request body deadline cancels an incomplete read", { timeout: 20_000 }
 test("Next.js enrolls, signs in, renames and revokes a browser credential", { timeout: 45_000 }, async () => {
   const channel = process.env.PASSKEY_TEST_BROWSER;
   browser = await chromium.launch(channel ? { channel } : {});
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" });
   const page = await context.newPage();
+  const listRequests = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/passkeys" &&
+        request.postDataJSON()?.operation === "list") listRequests.push(request.url());
+  });
   const devtools = await context.newCDPSession(page);
   await devtools.send("WebAuthn.enable");
-  await devtools.send("WebAuthn.addVirtualAuthenticator", { options: {
+  const { authenticatorId } = await devtools.send("WebAuthn.addVirtualAuthenticator", { options: {
     protocol: "ctap2", transport: "internal", hasResidentKey: true,
     hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
   } });
@@ -195,6 +200,10 @@ test("Next.js enrolls, signs in, renames and revokes a browser credential", { ti
   }
 
   async function fallback(email) {
+    if (!await page.getByLabel("Email").isVisible()) {
+      await page.getByText("How it works", { exact: true }).click();
+      await page.getByRole("link", { name: "Use a local test account" }).click();
+    }
     await page.getByLabel("Email").fill(email);
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Sign in with password" }).click();
@@ -206,7 +215,76 @@ test("Next.js enrolls, signs in, renames and revokes a browser credential", { ti
     await page.getByRole("button", { name: "Sign in with a passkey" }).waitFor();
   }
 
+  async function checkPending(operation, trigger, label) {
+    let started;
+    let release;
+    const requestStarted = new Promise((resolve) => { started = resolve; });
+    const paused = new Promise((resolve) => { release = resolve; });
+    await page.route(/\/api\/passkeys(?:\?|$)/u, async (route) => {
+      if (route.request().postDataJSON().operation === operation) {
+        started();
+        await paused;
+      }
+      await route.continue();
+    });
+    try {
+      await trigger();
+      await requestStarted;
+      await page.getByText(label, { exact: true }).waitFor();
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "wait" });
+    }
+  }
+
+  async function removePasskey() {
+    await page.getByRole("button", { name: /^Remove /u }).click();
+    const dialog = page.getByRole("dialog", { name: "Remove passkey?" });
+    await dialog.getByText(/password manager or device/u).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
+    await checkPending("revoke", () => dialog.getByRole("button", { name: "Remove passkey", exact: true }).click(),
+      "Removing…");
+    await page.getByText("Passkey removed.", { exact: true }).waitFor();
+    await page.getByText(/No passkeys yet/u).waitFor();
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), "Add a passkey");
+  }
+
   await page.goto(origin);
+  assert.equal(await page.getByRole("button", { name: "Sign in with a passkey" }).count(), 0);
+  assert.equal(await page.getByRole("link", { name: "NPM", exact: true }).getAttribute("href"),
+    "https://www.npmjs.com/package/next-passkey-webauthn");
+  await page.getByText("About passkeys", { exact: true }).press("Enter");
+  await page.getByText("Where is it saved?", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "Start demo" }).click();
+  const guest = await page.getByText(/^Signed in as Demo /u).innerText();
+  await page.getByText("About passkeys", { exact: true }).click();
+  await page.getByText("Where is it saved?", { exact: true }).waitFor();
+  await page.getByText(/No passkeys yet/u).waitFor();
+  assert.equal(listRequests.length, 1);
+  await checkPending("begin-enrollment", () => page.getByRole("button", { name: "Add a passkey" }).click(),
+    "Adding passkey…");
+  await page.getByText("Passkey added. Sign out to try it.").waitFor();
+  assert.equal(listRequests.length, 2);
+  await page.reload();
+  await page.getByRole("button", { name: /^Rename /u }).waitFor();
+  assert.equal(listRequests.length, 2);
+  await signOut();
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("next-passkey-demo:list:v1")), null);
+  await page.goto(origin);
+  await page.getByRole("link", { name: "I already have a demo passkey" }).click();
+  await page.getByRole("heading", { name: "Welcome back" }).waitFor();
+  await page.getByRole("button", { name: "Start a new demo" }).waitFor();
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await page.getByRole("heading", { name: "You’re in." }).waitFor();
+  await page.getByText(guest, { exact: true }).waitFor();
+  await removePasskey();
+  await devtools.send("WebAuthn.clearCredentials", { authenticatorId });
+  await signOut();
+  await page.getByRole("button", { name: "Start a new demo" }).click();
+  assert.notEqual(await page.getByText(/^Signed in as Demo /u).innerText(), guest);
+  await signOut();
+  await page.getByText("How it works", { exact: true }).click();
+  await page.getByRole("link", { name: "Use a local test account" }).click();
   await page.getByLabel("Email").fill(firstAccount);
   await page.getByLabel("Password").fill("incorrect-demo-password");
   await page.getByRole("button", { name: "Sign in with password" }).click();
@@ -215,47 +293,48 @@ test("Next.js enrolls, signs in, renames and revokes a browser credential", { ti
   assert.equal((await post({ operation: "begin-sign-in" }, "https://other.example.test")).status(), 403);
   assert.equal((await post({ operation: "list", userId: "demo-one" })).status(), 400);
 
-  let receiveInitialList;
-  let releaseInitialLists;
-  const initialList = new Promise((resolve) => { receiveInitialList = resolve; });
-  const release = new Promise((resolve) => { releaseInitialLists = resolve; });
-  const delayedLists = [];
-  let enrollmentStarted = false;
-  await page.route("**/api/passkeys", async (route) => {
-    const operation = route.request().postDataJSON().operation;
-    if (operation === "begin-enrollment") enrollmentStarted = true;
-    if (enrollmentStarted || operation !== "list") return route.continue();
-    delayedLists.push(route.request().response().then((response) => response?.finished()));
-    const response = await route.fetch();
-    const snapshot = await response.json();
-    receiveInitialList(snapshot);
-    await release;
-    await route.fulfill({ status: response.status(), json: snapshot });
-  });
-  try {
-    await fallback(firstAccount);
-    assert.deepEqual(await initialList, { passkeys: [] });
-    await page.getByRole("button", { name: "Add a passkey" }).click();
-    await page.getByLabel("Passkey name").waitFor();
-
-    releaseInitialLists();
-    await Promise.all(delayedLists);
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-    assert.equal(await page.getByLabel("Passkey name").count(), 1);
-  } finally {
-    releaseInitialLists();
-    await page.unrouteAll({ behavior: "wait" });
-  }
+  await checkPending("list", () => fallback(firstAccount), "Loading passkeys…");
+  await page.getByText(/No passkeys yet/u).waitFor();
+  await page.getByRole("button", { name: "Add a passkey" }).click();
+  await page.getByText("Passkey added. Sign out to try it.").waitFor();
   const list = await (await post({ operation: "list" })).json();
   assert.equal(list.passkeys.length, 1);
   const [{ id }] = list.passkeys;
   assert.deepEqual(Object.keys(list.passkeys[0]).sort(), ["backedUp", "createdAt", "id", "lastUsedAt", "name"]);
-  await page.getByLabel("Passkey name").fill("Renamed test passkey");
-  await page.getByRole("button", { name: "Rename" }).click();
+  const readsBeforeRename = listRequests.length;
+  await page.getByRole("button", { name: /^Rename /u }).click();
+  const renameDialog = page.getByRole("dialog", { name: "Rename passkey" });
+  await renameDialog.getByLabel("Passkey name").fill("Renamed test passkey");
+  await checkPending("rename", () => renameDialog.getByRole("button", { name: "Save name" }).click(), "Saving name…");
+  await page.getByText("Passkey renamed.", { exact: true }).waitFor();
   await page.getByText("Renamed test passkey", { exact: true }).waitFor();
+  await page.reload();
+  await page.getByText("Renamed test passkey", { exact: true }).waitFor();
+  assert.equal(listRequests.length, readsBeforeRename);
+
+  async function ageCachedList(seconds) {
+    await page.evaluate((age) => {
+      const key = "next-passkey-demo:list:v1";
+      const saved = JSON.parse(sessionStorage.getItem(key));
+      sessionStorage.setItem(key, JSON.stringify({ ...saved, fetchedAt: Date.now() - age * 1000 }));
+    }, seconds);
+  }
+
+  await ageCachedList(40);
+  await page.reload();
+  await page.getByText("Renamed test passkey", { exact: true }).waitFor();
+  assert.equal(listRequests.length, readsBeforeRename);
+
+  await ageCachedList(61);
+  await page.reload();
+  await page.getByText("Renamed test passkey", { exact: true }).waitFor();
+  assert.equal(listRequests.length, readsBeforeRename + 1);
+  const previousScope = listRequests.at(-1);
 
   await signOut();
   await fallback("two@example.test");
+  await page.getByText(/No passkeys yet/u).waitFor();
+  assert.equal((await context.request.post(previousScope, { headers: { origin }, data: { operation: "list" } })).status(), 401);
   assert.deepEqual(await (await post({ operation: "list" })).json(), { passkeys: [] });
   assert.equal((await post({ operation: "rename", id, name: "Wrong owner" })).status(), 404);
   assert.equal((await post({ operation: "revoke", id })).status(), 404);
@@ -263,15 +342,17 @@ test("Next.js enrolls, signs in, renames and revokes a browser credential", { ti
 
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await page.getByText(`Signed in as ${firstAccount}`).waitFor();
-  await page.getByText("Last used").waitFor();
-  page.once("dialog", (dialog) => dialog.accept());
-  await page.getByRole("button", { name: "Revoke" }).click();
-  await page.getByText("No passkeys registered.").waitFor();
+  await page.getByText(/^Last used /u).waitFor();
+  const readsBeforeRemove = listRequests.length;
+  await removePasskey();
+  await page.reload();
+  await page.getByText(/No passkeys yet/u).waitFor();
+  assert.equal(listRequests.length, readsBeforeRemove);
 
   await signOut();
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await page.getByRole("alert").filter({ hasText: "could not be verified" }).waitFor();
   await fallback(firstAccount);
-  await page.getByText("No passkeys registered.").waitFor();
+  await page.getByText(/No passkeys yet/u).waitFor();
   await context.close();
 });
